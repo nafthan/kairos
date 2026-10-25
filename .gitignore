@@ -1,0 +1,11 @@
+# Build output
+bin/
+obj/
+publish/
+
+# Editors
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo

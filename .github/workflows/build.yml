@@ -1,0 +1,50 @@
+name: Build
+
+# Builds Kairos.exe on every push and pull request.
+# Pushing a tag like v1.2.0 also creates a GitHub release with Kairos.exe attached.
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Check tag matches the version in Kairos.csproj
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content Kairos.csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            Write-Error "Tag ${{ github.ref_name }} doesn't match <Version>$version</Version> in Kairos.csproj"
+            exit 1
+          }
+
+      - name: Build
+        run: dotnet publish Kairos.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o publish
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kairos
+          path: publish/Kairos.exe
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" publish/Kairos.exe --title "Kairos ${{ github.ref_name }}" --generate-notes

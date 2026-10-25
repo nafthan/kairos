@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- The Windows 10 SDK version suffix gives access to Windows' built-in media controls API. -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Lets the project be compiled on non-Windows machines (it still only runs on Windows). -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>Kairos</AssemblyName>
+    <RootNamespace>Kairos</RootNamespace>
+    <Product>Kairos</Product>
+    <!-- The one place to change the version for a release (then add a CHANGELOG.md entry and tag vX.Y.Z). -->
+    <Version>1.2.0</Version>
+    <Description>A small, always-on-top window for time-synced Spotify lyrics.</Description>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Kairos.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Kairos.ico" />
+    <!-- Shown as the version history in settings -->
+    <Resource Include="CHANGELOG.md" />
+  </ItemGroup>
+
+</Project>
