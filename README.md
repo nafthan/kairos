@@ -8,10 +8,12 @@ A small, always-on-top window for Windows that shows Spotify lyrics in time with
 
 - The line being sung is highlighted and kept centred, gliding smoothly from line to line.
 - Album art beside the title, or blurred behind the lyrics with a slow drift.
+- Your own background image, with brightness, contrast, saturation, blur, opacity, tint, fit, zoom and position controls.
+- Optional Spotify connection: add the playing song to a playlist in one click, and browse and play your playlists.
 - Your own lyrics folder for songs the online library doesn't have, with import from `.lrc` and `.txt` files.
 - Fully customisable: fonts, sizes, colours, themes (including your own), opacity, shape and behaviour, all previewed live.
 - Drag to move, resize from the corner, lock position and size, click a line to jump to it, scroll to browse.
-- No Spotify login and no third-party packages.
+- No third-party packages, and no Spotify login unless you turn on the playlist features.
 
 ## Download
 
@@ -40,6 +42,15 @@ Documents\Kairos Lyrics\
 
 You can also add or edit files there directly. Your own lyrics are always used ahead of the online library. Matching ignores capitals, accents, punctuation and suffixes like "- Remastered 2011". When importing several files at once, each file needs `[ar:]` and `[ti:]` tags or a name like `Artist - Song.lrc`.
 
+## Playlists (optional)
+
+Adding songs to playlists and browsing them uses Spotify's Web API, so it needs a little one-time setup. Spotify requires each person to register their own free developer app, and it needs **Spotify Premium**.
+
+1. Open settings → **Spotify** and follow the four steps: create an app in the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard), add the redirect address `http://127.0.0.1:43821/callback`, tick **Web API**, and copy the app's Client ID.
+2. Paste the Client ID into Kairos and click **Connect**, then approve access in your browser.
+
+Afterwards, hover over the lyrics window: **+** adds the playing song to a playlist and the list button opens your playlists. Both are in the right-click menu too. Kairos never sees your password, and the sign-in is stored encrypted for your Windows account only. Spotify only lets apps list the songs in playlists you made or collaborate on; followed playlists can still be played.
+
 ## Where things are saved
 
 | What | Where |
@@ -47,10 +58,13 @@ You can also add or edit files there directly. Your own lyrics are always used a
 | Settings and saved themes | `%APPDATA%\Kairos\settings.json` |
 | Lyrics looked up online (cache) | `%APPDATA%\Kairos\cache-v2` |
 | Your own lyrics | `Documents\Kairos Lyrics` (can be changed in settings) |
+| Background image (a copy of the one you chose) | `%APPDATA%\Kairos\backgrounds` |
+| Spotify sign-in (encrypted) | inside `settings.json`, readable only by your Windows account |
 
 ## How it works
 
 - **What's playing and the album art** come from Windows' built-in media controls, the same source as the volume-key media overlay.
+- **Playlists** (if you connect Spotify) use Spotify's Web API with your own developer app.
 - **Lyrics** come from your own folder first, then [LRCLIB](https://lrclib.net), a free and open database of time-synced lyrics. Spotify doesn't make its own lyrics available to other apps.
 - **Spotify Canvas** videos aren't available to other apps, so Kairos can't show them; the album art background is the closest alternative.
 
@@ -75,6 +89,6 @@ You can also add or edit files there directly. Your own lyrics are always used a
 
 1. Change `<Version>` in `Kairos.csproj`.
 2. Add an entry at the top of `CHANGELOG.md`; it appears in the app under settings → *What's new*.
-3. Commit, then tag and push: `git tag v1.2.0 && git push origin v1.2.0`.
+3. Commit, then tag and push: `git tag v1.3.0 && git push origin v1.3.0`.
 
 GitHub Actions builds `Kairos.exe` and creates the release automatically. It checks that the tag matches the version in `Kairos.csproj` first.

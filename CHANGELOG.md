@@ -2,6 +2,20 @@
 
 All notable changes to Kairos are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## [1.3.0] - 2026-10-25
+
+### Added
+- Spotify connection (optional): add the song that's playing to a playlist straight from the lyrics window, and browse and play your playlists. Needs Spotify Premium and a one-time developer app setup, guided step by step in settings.
+- Background images: choose or drop in any picture, then adjust brightness, contrast, saturation, blur, opacity, tint, fit, zoom, position and mirroring. The editor and its preview appear once an image is chosen.
+- A Background page in settings to choose between a colour, your own image or the album art.
+
+### Changed
+- The album art background moved to the Background page; your setting carries over.
+- "Show album art beside the title" moved to the Window page.
+
+### Fixed
+- The song title now lines up with the centred lyrics when album art is shown beside it.
+
 ## [1.2.0] - 2026-10-25
 
 ### Added

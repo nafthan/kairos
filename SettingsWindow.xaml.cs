@@ -26,6 +26,9 @@ namespace Kairos
         private readonly bool _startWithWindowsAtOpen;
         private readonly Func<TrackInfo?> _currentTrack;
         private readonly Action _lyricsChanged;
+        private readonly Func<System.Windows.Media.Imaging.BitmapSource?> _albumArt;
+        private readonly SpotifyClient _spotify;
+        private System.Threading.CancellationTokenSource? _connectCts;
         private static string _lastPage = "text";
         private string _page = "text";
 
@@ -33,16 +36,20 @@ namespace Kairos
         {
             ("text",      "", "Text",      "Font, size and how the current line stands out"),
             ("colours",   "", "Colours",   "Themes, text colours and background"),
-            ("artwork",   "\uE91B", "Artwork",   "Album art beside the title or behind the lyrics"),
+            ("background", "\uE91B", "Background", "A colour, your own picture, or the album art"),
             ("window",    "", "Window",    "Shape, placement and how the window behaves"),
             ("behaviour", "", "Behaviour", "Scrolling, seeking and lyrics timing"),
             ("lyrics",    "\uE8F1", "My lyrics", "Your own lyrics, for songs the online library doesn't have"),
+            ("spotify",   "\uE8D6", "Spotify",   "Connect your account to add songs to playlists and browse them"),
             ("shortcuts", "", "Shortcuts", "Keys, mouse actions and where things are saved"),
         };
 
-        public SettingsWindow(Settings settings, Action apply, string? startPage = null,
-                              Func<TrackInfo?>? currentTrack = null, Action? lyricsChanged = null)
+        public SettingsWindow(Settings settings, Action apply, string? startPage = null, SpotifyClient? spotify = null,
+                              Func<TrackInfo?>? currentTrack = null, Action? lyricsChanged = null,
+                              Func<System.Windows.Media.Imaging.BitmapSource?>? albumArt = null)
         {
+            _albumArt = albumArt ?? (() => null);
+            _spotify = spotify ?? new SpotifyClient(settings);
             _s = settings;
             _apply = apply;
             _currentTrack = currentTrack ?? (() => null);
@@ -57,10 +64,11 @@ namespace Kairos
             if (startPage != null) _lastPage = startPage;
             BuildNav();
             ShowPage(_lastPage);
+            PreviewBg.ImageLoaded += RefreshPreview;
             RefreshPreview();
 
             KeyDown += (_, e) => { if (e.Key == Key.Escape) Close(); };
-            Closing += (_, _) => Commit();
+            Closing += (_, _) => { _connectCts?.Cancel(); Commit(); };
         }
 
         // =================================================================
@@ -115,14 +123,16 @@ namespace Kairos
             PageTitle.Text = page.Title;
             PageSubtitle.Text = page.Subtitle;
             PageHost.Children.Clear();
+            _extraPreviews.Clear();
 
             switch (page.Key)
             {
                 case "text": BuildTextPage(); break;
                 case "colours": BuildColoursPage(); break;
                 case "window": BuildWindowPage(); break;
-                case "artwork": BuildArtworkPage(); break;
+                case "background": BuildBackgroundPage(); break;
                 case "lyrics": BuildLyricsPage(); break;
+                case "spotify": BuildSpotifyPage(); break;
                 case "behaviour": BuildBehaviourPage(); break;
                 case "shortcuts": BuildShortcutsPage(); break;
             }
@@ -141,9 +151,10 @@ namespace Kairos
 
         private void Undo_Click(object sender, RoutedEventArgs e)
         {
-            var savedThemes = _s.CustomThemes; // saved themes aren't undone, only settings
+            // Saved themes, the Spotify connection and the lyrics folder aren't undone, only settings.
+            var keep = _s.Clone();
             _s.CopyFrom(_snapshot);
-            _s.CustomThemes = savedThemes;
+            _s.KeepPersonalDataFrom(keep);
             Changed();
             Refresh();
         }
@@ -167,6 +178,7 @@ namespace Kairos
         {
             if (_s.StartWithWindows != _startWithWindowsAtOpen || _s.StartWithWindows)
                 Settings.SetStartWithWindows(_s.StartWithWindows);
+            CleanUpBackgrounds();
             _s.Save();
         }
 
@@ -213,11 +225,6 @@ namespace Kairos
             ColorRow(text, "Current line", () => _s.CurrentLineColor, v => _s.CurrentLineColor = v);
             ColorRow(text, "Other lines", () => _s.OtherLinesColor, v => _s.OtherLinesColor = v);
             SliderRow(text, "Other lines brightness", null, 0.05, 1, 0.05, _s.OtherLinesOpacity, v => _s.OtherLinesOpacity = v, v => $"{v * 100:0}%");
-
-            var bg = Card("Background");
-            ColorRow(bg, "Colour", () => _s.BackgroundColor, v => _s.BackgroundColor = v);
-            SliderRow(bg, "Opacity", "0% leaves just the text floating on your desktop", 0, 1, 0.05,
-                _s.BackgroundOpacity, v => _s.BackgroundOpacity = v, v => $"{v * 100:0}%");
         }
 
         private void BuildWindowPage()
@@ -229,6 +236,7 @@ namespace Kairos
             var win = Card("Window");
             SwitchRow(win, "Always on top", "Stays above other windows while you work", _s.AlwaysOnTop, v => _s.AlwaysOnTop = v);
             SwitchRow(win, "Show song title and artist", null, _s.ShowTrackInfo, v => _s.ShowTrackInfo = v);
+            SwitchRow(win, "Show album art beside the title", null, _s.ShowAlbumArt, v => _s.ShowAlbumArt = v);
             SwitchRow(win, "Lock position", "Stops the window being dragged by accident", _s.LockPosition, v => _s.LockPosition = v);
             SwitchRow(win, "Lock size", "Hides the resize handle so the window can't be resized by accident", _s.LockSize, v => _s.LockSize = v);
             SwitchRow(win, "Show in taskbar", null, _s.ShowInTaskbar, v => _s.ShowInTaskbar = v);
@@ -265,29 +273,230 @@ namespace Kairos
             Row(data, "Clear saved lyrics", "Songs are looked up again the next time they play", clear);
         }
 
-        private void BuildArtworkPage()
+        private void BuildBackgroundPage()
         {
-            var thumb = Card("Beside the title");
-            SwitchRow(thumb, "Show album art", "A small cover next to the song title (needs \"Show song title\" on)", _s.ShowAlbumArt, v => _s.ShowAlbumArt = v);
+            var mode = Card("Behind the lyrics");
+            Row(mode, "Background", null, Segmented(
+                new[] { ("Colour", "Colour"), ("Image", "Image"), ("AlbumArt", "Album art") },
+                _s.BackgroundMode,
+                v => { _s.BackgroundMode = v; Changed(); Refresh(); }));
 
-            var bg = Card("Background");
-            SwitchRow(bg, "Album art background", "The cover, blurred, fills the window behind the lyrics", _s.AlbumArtBackground, v => _s.AlbumArtBackground = v);
-            SliderRow(bg, "Blur", null, 0, 80, 1, _s.AlbumArtBlur, v => _s.AlbumArtBlur = v, v => v < 0.5 ? "None" : $"{v:0}");
-            SliderRow(bg, "Dimming", "Darkens the artwork with your background colour so lyrics stay readable", 0, 1, 0.05,
+            switch (_s.BackgroundMode)
+            {
+                case "Image": BuildImageSection(); break;
+                case "AlbumArt": BuildAlbumArtSection(); break;
+                default:
+                    var colour = Card("Colour");
+                    ColorRow(colour, "Colour", () => _s.BackgroundColor, v => _s.BackgroundColor = v);
+                    SliderRow(colour, "Opacity", "0% leaves just the text floating on your desktop", 0, 1, 0.05,
+                        _s.BackgroundOpacity, v => _s.BackgroundOpacity = v, v => $"{v * 100:0}%");
+                    break;
+            }
+        }
+
+        private void BuildImageSection()
+        {
+            bool hasImage = !string.IsNullOrEmpty(_s.BackgroundImagePath) && File.Exists(_s.BackgroundImagePath);
+            if (!hasImage)
+            {
+                // Until an image is chosen, just the picker: the preview and editing controls appear afterwards.
+                var pick = Card("Your image");
+                pick.Children.Add(DropZone());
+                return;
+            }
+
+            var card = Card("Your image");
+            var previewHolder = new StackPanel { Margin = new Thickness(16, 16, 16, 8) };
+            previewHolder.Children.Add(MakeLargePreview());
+            card.Children.Add(previewHolder);
+
+            var change = new Button { Style = (Style)FindResource("GhostButton"), Content = "Change image…", Margin = new Thickness(0, 0, 8, 0) };
+            var remove = new Button { Style = (Style)FindResource("TextButton"), Content = "Remove" };
+            change.Click += (_, _) => ChooseImageFile();
+            remove.Click += (_, _) =>
+            {
+                _s.BackgroundImagePath = "";
+                _s.BackgroundMode = "Colour";
+                ImageProcessor.Invalidate();
+                Changed();
+                Refresh();
+            };
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 4, 0, 14) };
+            buttons.Children.Add(change);
+            buttons.Children.Add(remove);
+            card.Children.Add(buttons);
+
+            static string Signed(double v) => Math.Abs(v) < 0.5 ? "0" : $"{v:+0;-0}";
+
+            var adjust = Card("Adjust");
+            SliderRow(adjust, "Brightness", null, -100, 100, 1, _s.ImageBrightness, v => _s.ImageBrightness = v, Signed);
+            SliderRow(adjust, "Contrast", null, -100, 100, 1, _s.ImageContrast, v => _s.ImageContrast = v, Signed);
+            SliderRow(adjust, "Saturation", "0% is black and white", 0, 200, 1, _s.ImageSaturation, v => _s.ImageSaturation = v, v => $"{v:0}%");
+            SliderRow(adjust, "Blur", null, 0, 60, 1, _s.ImageBlur, v => _s.ImageBlur = v, v => v < 0.5 ? "None" : $"{v:0}");
+            SliderRow(adjust, "Opacity", "Lower lets your desktop show through", 0, 1, 0.05, _s.ImageOpacity, v => _s.ImageOpacity = v, v => $"{v * 100:0}%");
+            ColorRow(adjust, "Tint colour", () => _s.ImageTintColor, v => _s.ImageTintColor = v);
+            SliderRow(adjust, "Tint strength", "Darkens or colours the image so lyrics stay readable", 0, 1, 0.05,
+                _s.ImageTintStrength, v => _s.ImageTintStrength = v, v => $"{v * 100:0}%");
+
+            var position = Card("Position");
+            Row(position, "Fit", "Fill crops to cover the window; Fit shows the whole picture", Segmented(
+                new[] { ("Fill", "Fill"), ("Fit", "Fit"), ("Stretch", "Stretch"), ("Tile", "Tile") },
+                _s.ImageFit,
+                v => { _s.ImageFit = v; Changed(); }));
+            SliderRow(position, "Zoom", null, 1, 3, 0.05, _s.ImageZoom, v => _s.ImageZoom = v, v => $"{v:0.00}×");
+            SliderRow(position, "Horizontal position", null, -100, 100, 1, _s.ImageOffsetX, v => _s.ImageOffsetX = v, v => Math.Abs(v) < 0.5 ? "Centre" : $"{v:+0;-0}");
+            SliderRow(position, "Vertical position", null, -100, 100, 1, _s.ImageOffsetY, v => _s.ImageOffsetY = v, v => Math.Abs(v) < 0.5 ? "Centre" : $"{v:+0;-0}");
+            SwitchRow(position, "Mirror", "Flip the picture left to right", _s.ImageFlip, v => _s.ImageFlip = v);
+
+            var reset = new Button { Style = (Style)FindResource("TextButton"), Content = "Reset image settings", HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
+            reset.Click += (_, _) => { _s.ResetImageAdjustments(); Changed(); Refresh(); };
+            PageHost.Children.Add(reset);
+        }
+
+        /// <summary>A dashed area to click, or drop an image file on.</summary>
+        private UIElement DropZone()
+        {
+            var dashed = new Rectangle
+            {
+                RadiusX = 10, RadiusY = 10,
+                Stroke = (Brush)FindResource("ControlBorderBrush"),
+                StrokeThickness = 1.5,
+                StrokeDashArray = new DoubleCollection { 5, 4 },
+            };
+            var text = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            text.Children.Add(new TextBlock { Text = "\uE91B", FontFamily = (FontFamily)FindResource("IconFont"), FontSize = 24, Foreground = (Brush)FindResource("MutedBrush"), HorizontalAlignment = HorizontalAlignment.Center });
+            text.Children.Add(new TextBlock { Text = "Choose an image", FontSize = 14, Foreground = (Brush)FindResource("TextBrush"), HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 10, 0, 2) });
+            text.Children.Add(new TextBlock { Text = "or drop one here  ·  JPG, PNG, BMP, GIF, WebP", FontSize = 12, Foreground = (Brush)FindResource("MutedBrush"), HorizontalAlignment = HorizontalAlignment.Center });
+
+            var grid = new Grid { Height = 150 };
+            grid.Children.Add(dashed);
+            grid.Children.Add(text);
+            var zone = new Border { Child = grid, Background = Brushes.Transparent, Cursor = Cursors.Hand, AllowDrop = true, Margin = new Thickness(16) };
+
+            zone.MouseEnter += (_, _) => dashed.Stroke = (Brush)FindResource("AccentBrush");
+            zone.MouseLeave += (_, _) => dashed.Stroke = (Brush)FindResource("ControlBorderBrush");
+            zone.MouseLeftButtonUp += (_, _) => ChooseImageFile();
+            zone.DragEnter += (_, _) => dashed.Stroke = (Brush)FindResource("AccentBrush");
+            zone.DragLeave += (_, _) => dashed.Stroke = (Brush)FindResource("ControlBorderBrush");
+            zone.DragOver += (_, e) =>
+            {
+                e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+                e.Handled = true;
+            };
+            zone.Drop += (_, e) =>
+            {
+                if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0) AdoptImage(files[0]);
+            };
+            return zone;
+        }
+
+        private void ChooseImageFile()
+        {
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Choose a background image",
+                Filter = "Images (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.webp;*.tif;*.tiff)|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.webp;*.tif;*.tiff|All files (*.*)|*.*",
+            };
+            if (dlg.ShowDialog(this) == true) AdoptImage(dlg.FileName);
+        }
+
+        /// <summary>Copies the picture into Kairos's own folder (so moving the original doesn't break it) and uses it.</summary>
+        private void AdoptImage(string file)
+        {
+            if (!ImageProcessor.CanOpen(file))
+            {
+                Refresh();
+                ShowLyricsBanner("That file isn't an image Kairos can open. Try a JPG or PNG.");
+                return;
+            }
+            try
+            {
+                Directory.CreateDirectory(Settings.BackgroundsFolder);
+                var dest = System.IO.Path.Combine(Settings.BackgroundsFolder,
+                    $"background-{DateTime.Now:yyyyMMdd-HHmmss}{System.IO.Path.GetExtension(file).ToLowerInvariant()}");
+                File.Copy(file, dest, overwrite: true);
+
+                ImageProcessor.Invalidate();
+                _s.BackgroundImagePath = dest;
+                _s.BackgroundMode = "Image";
+                _s.ImageZoom = 1;
+                _s.ImageOffsetX = 0;
+                _s.ImageOffsetY = 0;
+                Changed();
+                Refresh();
+            }
+            catch (Exception ex)
+            {
+                Refresh();
+                ShowLyricsBanner($"Couldn't use that image: {ex.Message}");
+            }
+        }
+
+        /// <summary>Removes background copies that are no longer in use (keeps the one still selected).</summary>
+        private void CleanUpBackgrounds()
+        {
+            try
+            {
+                if (!Directory.Exists(Settings.BackgroundsFolder)) return;
+                foreach (var f in Directory.GetFiles(Settings.BackgroundsFolder))
+                    if (!string.Equals(f, _s.BackgroundImagePath, StringComparison.OrdinalIgnoreCase))
+                        try { File.Delete(f); } catch { }
+            }
+            catch { }
+        }
+
+        private void BuildAlbumArtSection()
+        {
+            var art = Card("Album art");
+            SliderRow(art, "Blur", null, 0, 80, 1, _s.AlbumArtBlur, v => _s.AlbumArtBlur = v, v => v < 0.5 ? "None" : $"{v:0}");
+            SliderRow(art, "Dimming", "Darkens the artwork with your window colour so lyrics stay readable", 0, 1, 0.05,
                 _s.AlbumArtDim, v => _s.AlbumArtDim = v, v => $"{v * 100:0}%");
-            SwitchRow(bg, "Slow drift", "A gentle, continuous zoom and pan on the artwork", _s.AnimateAlbumArt, v => _s.AnimateAlbumArt = v);
+            ColorRow(art, "Dimming colour", () => _s.BackgroundColor, v => _s.BackgroundColor = v);
+            SwitchRow(art, "Slow drift", "A gentle, continuous zoom and pan on the artwork", _s.AnimateAlbumArt, v => _s.AnimateAlbumArt = v);
+            Hint(art, "Shows whenever the song has a cover; otherwise your window colour is used.");
 
             var canvas = Card("About Spotify Canvas");
-            canvas.Children.Add(new TextBlock
+            Hint(canvas, "Spotify's looping Canvas videos aren't shared with other apps, so Kairos can't show them. " +
+                         "The album art background with slow drift is the closest alternative.");
+        }
+
+        private void Hint(StackPanel card, string text)
+        {
+            card.Children.Add(new TextBlock
             {
-                Text = "Spotify's looping Canvas videos aren't shared with other apps, so Kairos can't show them. " +
-                       "The album art background with slow drift is the closest alternative.",
+                Text = text,
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = (Brush)FindResource("MutedBrush"),
                 FontSize = 12.5,
                 LineHeight = 19,
-                Margin = new Thickness(16, 12, 16, 12),
+                Margin = new Thickness(16, 10, 16, 12),
             });
+        }
+
+        /// <summary>A row of word buttons where one is selected, e.g. Colour | Image | Album art.</summary>
+        private UIElement Segmented((string Value, string Label)[] options, string current, Action<string> onPick)
+        {
+            string group = Guid.NewGuid().ToString("N");
+            var panel = new StackPanel { Orientation = Orientation.Horizontal };
+            foreach (var (value, label) in options)
+            {
+                var rb = new RadioButton
+                {
+                    Style = (Style)FindResource("TextSegment"),
+                    Content = label,
+                    GroupName = group,
+                    IsChecked = string.Equals(current, value, StringComparison.OrdinalIgnoreCase),
+                };
+                rb.Checked += (_, _) => onPick(value);
+                panel.Children.Add(rb);
+            }
+            return new Border
+            {
+                Background = (Brush)FindResource("ControlBrush"),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(3),
+                Child = panel,
+            };
         }
 
         // ----- My lyrics -----
@@ -542,6 +751,149 @@ namespace Kairos
         {
             try { return File.ReadAllText(path); } catch { return ""; }
         }
+
+        private void BuildSpotifyPage()
+        {
+            if (_spotify.IsConnected)
+            {
+                var conn = Card("Connected");
+                var disconnect = new Button { Style = (Style)FindResource("GhostButton"), Content = "Disconnect" };
+                disconnect.Click += (_, _) =>
+                {
+                    _spotify.Disconnect();
+                    Changed();
+                    Refresh();
+                };
+                Row(conn, $"Signed in as {(_s.SpotifyUserName.Length > 0 ? _s.SpotifyUserName : "your Spotify account")}",
+                    "Kairos can add the current song to your playlists, list them, and play them.", disconnect);
+
+                var use = Card("Using it");
+                Hint(use, "Hover over the lyrics window: the + button adds the song that's playing to a playlist, and the list button opens your playlists. " +
+                          "Both are also in the right-click menu.");
+
+                var about = Card("Your developer app");
+                Row(about, "Client ID", MaskId(_s.SpotifyClientId), new Border());
+                Hint(about, "Spotify limits each developer app to a few users and needs Premium on the account that owns it. " +
+                            "If sign-in ever says your account isn't registered, add your Spotify email under User Management in the dashboard.");
+                return;
+            }
+
+            var intro = Card(null);
+            Hint(intro, "Playlist features use Spotify's Web API, which needs a (free) developer app registered to your own account. " +
+                        "It's a one-time setup of about five minutes, and needs Spotify Premium.");
+
+            var steps = Card("Set up");
+            Step(steps, 1, "Open the Spotify Developer Dashboard and sign in with your Spotify account. Click Create app.",
+                ActionButton("Open dashboard", () =>
+                {
+                    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(SpotifyClient.DashboardUrl) { UseShellExecute = true }); } catch { }
+                }));
+
+            var uriBox = new TextBox { Style = (Style)FindResource("DarkText"), Text = SpotifyClient.RedirectUri, IsReadOnly = true, Width = 250 };
+            var copy = ActionButton("Copy", () => { });
+            copy.Click += (_, _) =>
+            {
+                try { Clipboard.SetText(SpotifyClient.RedirectUri); copy.Content = "Copied"; } catch { }
+            };
+            var uriRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+            uriRow.Children.Add(uriBox);
+            copy.Margin = new Thickness(8, 0, 0, 0);
+            uriRow.Children.Add(copy);
+            Step(steps, 2, "Name it anything (for example \"Kairos\") and add a short description. Under Redirect URIs, add exactly this address:", uriRow);
+
+            Step(steps, 3, "Under \"Which API/SDKs are you planning to use?\" tick Web API, accept the terms and Save.", null);
+
+            var idBox = new TextBox { Style = (Style)FindResource("DarkText"), Text = _s.SpotifyClientId, Width = 300 };
+            var connect = new Button { Style = (Style)FindResource("PrimaryButton"), Content = "Connect", Margin = new Thickness(8, 0, 0, 0) };
+            var status = new TextBlock { FontSize = 12.5, Foreground = (Brush)FindResource("MutedBrush"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0) };
+            var idRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+            idRow.Children.Add(idBox);
+            idRow.Children.Add(connect);
+            var idPanel = new StackPanel();
+            idPanel.Children.Add(idRow);
+            idPanel.Children.Add(status);
+            Step(steps, 4, "On your new app's page, open Settings and copy the Client ID. Paste it here and click Connect, then approve access in your browser.", idPanel);
+
+            connect.Click += async (_, _) =>
+            {
+                if (_connectCts != null)
+                {
+                    // Second click while waiting = cancel.
+                    _connectCts.Cancel();
+                    return;
+                }
+                _connectCts = new System.Threading.CancellationTokenSource();
+                connect.Content = "Cancel";
+                status.Foreground = (Brush)FindResource("MutedBrush");
+                status.Text = "Waiting for you to approve access in your browser…";
+                try
+                {
+                    await _spotify.ConnectAsync(idBox.Text, _connectCts.Token);
+                    Changed();
+                    Refresh();
+                    ShowLyricsBanner($"Connected to Spotify as {_s.SpotifyUserName}.");
+                    Activate();
+                }
+                catch (SpotifyException ex)
+                {
+                    status.Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0x8A, 0x8A));
+                    status.Text = ex.Message;
+                }
+                catch (OperationCanceledException)
+                {
+                    status.Text = "Cancelled.";
+                }
+                finally
+                {
+                    _connectCts?.Dispose();
+                    _connectCts = null;
+                    connect.Content = "Connect";
+                }
+            };
+
+            var privacy = Card("Privacy");
+            Hint(privacy, "Kairos never sees your Spotify password. Sign-in happens on Spotify's own page, and the access it grants is " +
+                          "stored encrypted so only your Windows account can read it. You can remove access any time with Disconnect, " +
+                          "or on spotify.com under Manage apps.");
+        }
+
+        /// <summary>A numbered setup step with optional controls underneath.</summary>
+        private void Step(StackPanel card, int number, string text, UIElement? extra)
+        {
+            if (card.Children.Count > 0)
+                card.Children.Add(new Border { Height = 1, Background = (Brush)FindResource("CardBorderBrush"), Margin = new Thickness(16, 0, 16, 0) });
+
+            var grid = new Grid { Margin = new Thickness(16, 14, 16, 14) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(34) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var badge = new Border
+            {
+                Width = 24, Height = 24, CornerRadius = new CornerRadius(12),
+                Background = (Brush)FindResource("ControlBrush"),
+                VerticalAlignment = VerticalAlignment.Top,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Child = new TextBlock { Text = number.ToString(), FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = (Brush)FindResource("AccentBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
+            };
+            grid.Children.Add(badge);
+
+            var body = new StackPanel();
+            body.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)FindResource("TextBrush"), LineHeight = 19, Margin = new Thickness(0, 2, 0, 0) });
+            if (extra != null) body.Children.Add(extra);
+            Grid.SetColumn(body, 1);
+            grid.Children.Add(body);
+            card.Children.Add(grid);
+        }
+
+        private Button ActionButton(string text, Action onClick)
+        {
+            var b = new Button { Style = (Style)FindResource("GhostButton"), Content = text, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 0) };
+            b.Click += (_, _) => onClick();
+            return b;
+        }
+
+        private static string MaskId(string id) =>
+            id.Length <= 8 ? id : id[..4] + new string('•', Math.Min(12, id.Length - 8)) + id[^4..];
 
         private void BuildShortcutsPage()
         {
@@ -1253,13 +1605,37 @@ namespace Kairos
         //  Live preview
         // =================================================================
 
+        /// <summary>A mock lyrics window: background layer, window colour, and three sample lines.</summary>
+        private sealed record PreviewParts(BackgroundLayer Layer, Border Frame, TextBlock Prev, TextBlock Current, TextBlock Next, double Width);
+
+        private readonly List<PreviewParts> _extraPreviews = new();
+
         private void RefreshPreview()
         {
+            StylePreview(new PreviewParts(PreviewBg, PreviewFrame, PreviewPrev, PreviewCurrent, PreviewNext, 340));
+            foreach (var p in _extraPreviews) StylePreview(p);
+        }
+
+        private void StylePreview(PreviewParts p)
+        {
+            // Previews are smaller than the real window, so blur and tile sizes are scaled to match.
+            double scale = p.Width / Math.Max(200, _s.Width);
+            double radius = Math.Max(0, _s.CornerRadius);
+
+            p.Layer.CornerRadius = radius;
+            p.Layer.Update(_s, _albumArt(), scale);
+
             var bg = MainWindow.ParseColor(_s.BackgroundColor, Colors.Black);
-            bg.A = (byte)Math.Clamp(Math.Round(_s.BackgroundOpacity * 255), 0, 255);
-            PreviewWindow.Background = new SolidColorBrush(bg);
-            PreviewWindow.CornerRadius = new CornerRadius(Math.Max(0, _s.CornerRadius));
-            PreviewWindow.Padding = new Thickness(Math.Clamp(_s.Padding, 0, 40));
+            double opacity = p.Layer.ActiveMode switch
+            {
+                "AlbumArt" => Math.Clamp(_s.AlbumArtDim, 0, 1),
+                "Image" => 0,
+                _ => _s.BackgroundOpacity,
+            };
+            bg.A = (byte)Math.Clamp(Math.Round(opacity * 255), 0, 255);
+            p.Frame.Background = new SolidColorBrush(bg);
+            p.Frame.CornerRadius = new CornerRadius(radius);
+            p.Frame.Padding = new Thickness(Math.Clamp(_s.Padding, 0, 40));
 
             var font = new FontFamily((_s.FontFamily ?? "Segoe UI") + ", Segoe UI");
             var align = (_s.TextAlignment ?? "").ToLowerInvariant() switch
@@ -1273,19 +1649,19 @@ namespace Kairos
             var oth = MainWindow.ParseColor(_s.OtherLinesColor, Colors.White);
             double othOpacity = Math.Clamp(_s.OtherLinesOpacity, 0.05, 1);
 
-            PreviewPrev.Text = "Streetlights hum a quiet tune";
-            PreviewCurrent.Text = "Every moment finds its place";
-            PreviewNext.Text = "And the night keeps time with you";
+            p.Prev.Text = "Streetlights hum a quiet tune";
+            p.Current.Text = "Every moment finds its place";
+            p.Next.Text = "And the night keeps time with you";
 
-            foreach (var tb in new[] { PreviewPrev, PreviewCurrent, PreviewNext })
+            foreach (var tb in new[] { p.Prev, p.Current, p.Next })
             {
                 tb.FontFamily = font;
                 tb.TextAlignment = align;
                 tb.Margin = new Thickness(0, 0, 0, Math.Max(0, _s.LineSpacing));
             }
-            PreviewNext.Margin = new Thickness(0);
+            p.Next.Margin = new Thickness(0);
 
-            foreach (var tb in new[] { PreviewPrev, PreviewNext })
+            foreach (var tb in new[] { p.Prev, p.Next })
             {
                 tb.FontSize = size;
                 tb.Foreground = new SolidColorBrush(oth);
@@ -1293,18 +1669,55 @@ namespace Kairos
                 tb.FontWeight = _s.OtherLinesBold ? FontWeights.SemiBold : FontWeights.Normal;
             }
 
-            PreviewCurrent.FontSize = size * Math.Clamp(_s.CurrentLineScale, 0.5, 3);
-            PreviewCurrent.Foreground = new SolidColorBrush(cur);
-            PreviewCurrent.Opacity = 1;
-            PreviewCurrent.FontWeight = _s.CurrentLineBold ? FontWeights.Bold : FontWeights.Normal;
-            PreviewCurrent.Effect = _s.CurrentLineGlow
+            p.Current.FontSize = size * Math.Clamp(_s.CurrentLineScale, 0.5, 3);
+            p.Current.Foreground = new SolidColorBrush(cur);
+            p.Current.Opacity = 1;
+            p.Current.FontWeight = _s.CurrentLineBold ? FontWeights.Bold : FontWeights.Normal;
+            p.Current.Effect = _s.CurrentLineGlow
                 ? new DropShadowEffect { Color = cur, BlurRadius = 16, ShadowDepth = 0, Opacity = 0.9 }
                 : null;
 
-            if (PreviewCurrent.Parent is UIElement linesPanel)
+            if (p.Current.Parent is UIElement linesPanel)
                 linesPanel.Effect = _s.TextShadow
                     ? new DropShadowEffect { Color = Colors.Black, BlurRadius = 6, ShadowDepth = 1.2, Opacity = 0.9 }
                     : null;
+        }
+
+        /// <summary>A bigger mock window for the image editor, shaped like the real window.</summary>
+        private FrameworkElement MakeLargePreview()
+        {
+            const double width = 440;
+            double ratio = Math.Clamp(_s.Height / Math.Max(1, _s.Width), 0.3, 1.2);
+            double height = Math.Round(width * ratio);
+
+            var layer = new BackgroundLayer();
+            var prev = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            var cur = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            var next = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            var lines = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            lines.Children.Add(prev);
+            lines.Children.Add(cur);
+            lines.Children.Add(next);
+            var frame = new Border { Child = lines };
+
+            var window = new Grid { Width = width, Height = height };
+            window.Children.Add(layer);
+            window.Children.Add(frame);
+
+            var parts = new PreviewParts(layer, frame, prev, cur, next, width);
+            _extraPreviews.Add(parts);
+            layer.ImageLoaded += () => StylePreview(parts);
+            StylePreview(parts);
+
+            // The same stand-in "desktop" behind it, so opacity is easy to judge.
+            return new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                Padding = new Thickness(18),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Background = new LinearGradientBrush(Color.FromRgb(0x2B, 0x3A, 0x67), Color.FromRgb(0xA0, 0x52, 0x6D), 45),
+                Child = window,
+            };
         }
 
         // =================================================================

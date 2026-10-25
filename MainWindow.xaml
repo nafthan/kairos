@@ -1,6 +1,7 @@
 <Window x:Class="Kairos.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Kairos"
         Title="Kairos"
         Icon="Kairos.ico"
         WindowStyle="None"
@@ -15,21 +16,8 @@
 
     <Grid x:Name="Root">
 
-        <!-- Optional blurred album art behind everything (clipped to the window's rounded corners in code) -->
-        <Border x:Name="ArtHost" Visibility="Collapsed" ClipToBounds="True" IsHitTestVisible="False">
-            <Image x:Name="ArtBackground" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center"
-                   RenderOptions.BitmapScalingMode="HighQuality" RenderTransformOrigin="0.5,0.5">
-                <Image.Effect>
-                    <BlurEffect x:Name="ArtBlur" Radius="40" KernelType="Gaussian" RenderingBias="Performance"/>
-                </Image.Effect>
-                <Image.RenderTransform>
-                    <TransformGroup>
-                        <ScaleTransform x:Name="ArtScale" ScaleX="1.15" ScaleY="1.15"/>
-                        <TranslateTransform x:Name="ArtShift"/>
-                    </TransformGroup>
-                </Image.RenderTransform>
-            </Image>
-        </Border>
+        <!-- Background image or album art (when chosen), drawn behind everything -->
+        <local:BackgroundLayer x:Name="Bg"/>
 
         <!-- Window background (colour, opacity and corner radius come from settings) -->
         <Border x:Name="Frame" CornerRadius="12" Background="#D9121212" Padding="16">
@@ -40,18 +28,16 @@
                 </Grid.RowDefinitions>
 
                 <!-- Song title and artist -->
-                <Grid x:Name="TrackInfoPanel" Grid.Row="0" Margin="0,0,0,8" IsHitTestVisible="False">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <Border x:Name="ArtThumb" Width="42" Height="42" CornerRadius="6" Margin="0,0,10,0"
-                            VerticalAlignment="Center" Visibility="Collapsed">
+                <!-- The text spans the full width (with equal space reserved on both sides when the cover shows),
+                     so centred titles line up with the centred lyrics. -->
+                <Grid x:Name="TrackInfoPanel" Grid.Row="0" Margin="0,0,0,8" IsHitTestVisible="False" MinHeight="42">
+                    <Border x:Name="ArtThumb" Width="42" Height="42" CornerRadius="6"
+                            HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="Collapsed">
                         <Border.Effect>
                             <DropShadowEffect BlurRadius="8" ShadowDepth="1" Opacity="0.4"/>
                         </Border.Effect>
                     </Border>
-                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                <StackPanel x:Name="TrackText" VerticalAlignment="Center">
                     <TextBlock x:Name="TrackTitle" FontWeight="SemiBold" FontSize="13" Foreground="White"
                                TextTrimming="CharacterEllipsis"/>
                     <TextBlock x:Name="TrackArtist" FontSize="11.5" Foreground="White" Opacity="0.6"
@@ -111,6 +97,8 @@
                 <Button x:Name="PlayPauseButton" Content="&#xE768;" ToolTip="Play / pause" Click="PlayPauseButton_Click"/>
                 <Button x:Name="NextButton" Content="&#xE893;" ToolTip="Next" Click="NextButton_Click"/>
                 <Border Width="1" Margin="4,5" Background="#40FFFFFF"/>
+                <Button x:Name="AddToPlaylistButton" Content="&#xE710;" ToolTip="Add to playlist" Click="AddToPlaylistButton_Click" Visibility="Collapsed"/>
+                <Button x:Name="PlaylistsButton" Content="&#xE8FD;" ToolTip="Playlists" Click="PlaylistsButton_Click" Visibility="Collapsed"/>
                 <Button x:Name="MoreButton" Content="&#xE712;" ToolTip="Settings" Click="MoreButton_Click"/>
                 <Button x:Name="CloseButton" Content="&#xE8BB;" ToolTip="Close" Click="CloseButton_Click"/>
             </StackPanel>

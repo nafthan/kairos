@@ -58,16 +58,64 @@ namespace Kairos
         // ----- Your own lyrics folder (empty = Documents\Kairos Lyrics) -----
         public string LyricsFolder { get; set; } = "";
 
+        // ----- Window background -----
+        /// <summary>"Colour", "Image" or "AlbumArt".</summary>
+        public string BackgroundMode { get; set; } = "Colour";
+
+        // Background image (a copy is kept in the app's folder, so moving the original doesn't break it)
+        public string BackgroundImagePath { get; set; } = "";
+        /// <summary>"Fill", "Fit", "Stretch" or "Tile".</summary>
+        public string ImageFit { get; set; } = "Fill";
+        public double ImageZoom { get; set; } = 1.0;        // 1 … 3
+        public double ImageOffsetX { get; set; } = 0;       // -100 … 100 (% of half the window)
+        public double ImageOffsetY { get; set; } = 0;
+        public bool ImageFlip { get; set; } = false;
+        public double ImageBrightness { get; set; } = 0;    // -100 … 100
+        public double ImageContrast { get; set; } = 0;      // -100 … 100
+        public double ImageSaturation { get; set; } = 100;  // 0 … 200 %
+        public double ImageBlur { get; set; } = 0;          // 0 … 60
+        public double ImageOpacity { get; set; } = 1.0;     // 0 … 1 (lower = see-through)
+        public string ImageTintColor { get; set; } = "#000000";
+        public double ImageTintStrength { get; set; } = 0.25; // 0 … 1
+
+        public void ResetImageAdjustments()
+        {
+            var d = new Settings();
+            ImageFit = d.ImageFit; ImageZoom = d.ImageZoom; ImageOffsetX = d.ImageOffsetX; ImageOffsetY = d.ImageOffsetY;
+            ImageFlip = d.ImageFlip; ImageBrightness = d.ImageBrightness; ImageContrast = d.ImageContrast;
+            ImageSaturation = d.ImageSaturation; ImageBlur = d.ImageBlur; ImageOpacity = d.ImageOpacity;
+            ImageTintColor = d.ImageTintColor; ImageTintStrength = d.ImageTintStrength;
+        }
+
+        public static string BackgroundsFolder => Path.Combine(AppDataFolder, "backgrounds");
+
         // ----- Album art -----
         /// <summary>Small cover picture beside the song title.</summary>
         public bool ShowAlbumArt { get; set; } = true;
-        /// <summary>Blurred cover filling the window behind the lyrics.</summary>
+        /// <summary>Old (1.2.0) switch for the album art background; now BackgroundMode = "AlbumArt".</summary>
         public bool AlbumArtBackground { get; set; } = false;
         public double AlbumArtBlur { get; set; } = 40;
         /// <summary>How much the background colour darkens the artwork (0 = full artwork, 1 = hidden).</summary>
         public double AlbumArtDim { get; set; } = 0.55;
         /// <summary>A slow drift and zoom on the background artwork.</summary>
         public bool AnimateAlbumArt { get; set; } = true;
+
+        // ----- Spotify connection (for playlists) -----
+        /// <summary>The Client ID of the user's own Spotify developer app.</summary>
+        public string SpotifyClientId { get; set; } = "";
+        /// <summary>The sign-in token, encrypted with Windows' per-user data protection (only this Windows account can read it).</summary>
+        public string SpotifyToken { get; set; } = "";
+        public string SpotifyUserName { get; set; } = "";
+
+        /// <summary>Things settings "Undo" and "Reset" shouldn't touch: saved themes, the Spotify connection, the lyrics folder.</summary>
+        public void KeepPersonalDataFrom(Settings source)
+        {
+            CustomThemes = source.CustomThemes;
+            SpotifyClientId = source.SpotifyClientId;
+            SpotifyToken = source.SpotifyToken;
+            SpotifyUserName = source.SpotifyUserName;
+            LyricsFolder = source.LyricsFolder;
+        }
 
         // ----- Themes the user has saved -----
         public List<ThemeData> CustomThemes { get; set; } = new();
@@ -98,7 +146,16 @@ namespace Kairos
                 if (File.Exists(SettingsPath))
                 {
                     var loaded = JsonSerializer.Deserialize<Settings>(File.ReadAllText(SettingsPath), JsonOptions);
-                    if (loaded != null) return loaded;
+                    if (loaded != null)
+                    {
+                        // 1.2.0 → 1.3.0: the album art background switch became a background mode.
+                        if (loaded.AlbumArtBackground)
+                        {
+                            loaded.BackgroundMode = "AlbumArt";
+                            loaded.AlbumArtBackground = false;
+                        }
+                        return loaded;
+                    }
                 }
             }
             catch
@@ -140,6 +197,11 @@ namespace Kairos
                 Left = Left, Top = Top, Width = Width, Height = Height,
                 StartWithWindows = StartWithWindows,
                 CustomThemes = CustomThemes, // saved themes are kept
+                LyricsFolder = LyricsFolder,
+                SpotifyClientId = SpotifyClientId,
+                SpotifyToken = SpotifyToken,
+                SpotifyUserName = SpotifyUserName,
+                BackgroundImagePath = BackgroundImagePath, // keep the chosen picture, just switch back to colour
             };
             CopyFrom(fresh);
         }

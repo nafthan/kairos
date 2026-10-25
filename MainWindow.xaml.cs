@@ -34,7 +34,7 @@ namespace Kairos
         private int _artRequest;
         private string? _artAlbumKey;    // album the current picture belongs to
         private int _artHash;            // to spot Spotify still serving the previous song's picture
-        private bool _artAnimating;
+
         private int _currentIndex = int.MinValue;
         private CancellationTokenSource? _fetchCts;
 
@@ -56,10 +56,13 @@ namespace Kairos
         private readonly DispatcherTimer _toastTimer = new() { Interval = TimeSpan.FromSeconds(2) };
 
         private SettingsWindow? _settingsWindow;
+        private PlaylistsWindow? _playlistsWindow;
+        private readonly SpotifyClient _spotify;
 
         public MainWindow(Settings settings)
         {
             _s = settings;
+            _spotify = new SpotifyClient(settings);
             InitializeComponent();
 
             RestorePlacement();
@@ -71,7 +74,8 @@ namespace Kairos
             _pollTimer.Tick += async (_, _) => await _media.PollAsync();
 
             LocationChanged += (_, _) => _saveTimer.Start();
-            SizeChanged += (_, _) => { UpdateSpacers(); UpdateArtClip(); _saveTimer.Start(); };
+            SizeChanged += (_, _) => { UpdateSpacers(); _saveTimer.Start(); };
+            Bg.ImageLoaded += ApplyFrameBackground;
             Scroller.SizeChanged += (_, _) => UpdateSpacers();
 
             MouseEnter += (_, _) => { Fade(HoverBar, 1, 150); Fade(ResizeGrip, 1, 150); };
@@ -124,12 +128,6 @@ namespace Kairos
             Topmost = _s.AlwaysOnTop;
             ShowInTaskbar = _s.ShowInTaskbar;
 
-            var bg = ParseColor(_s.BackgroundColor, Colors.Black);
-            // With artwork behind, the background colour acts as a dimming layer over it instead.
-            double bgOpacity = ArtBackgroundActive ? Math.Clamp(_s.AlbumArtDim, 0, 1) : _s.BackgroundOpacity;
-            // Keep alpha ≥ 2: a fully transparent window lets clicks fall through to whatever is behind it.
-            bg.A = (byte)Math.Clamp(Math.Round(bgOpacity * 255), 2, 255);
-            Frame.Background = new SolidColorBrush(bg);
             ApplyArtwork();
             Frame.CornerRadius = new CornerRadius(Math.Max(0, _s.CornerRadius));
             Frame.Padding = new Thickness(Math.Max(0, _s.Padding));
@@ -161,6 +159,9 @@ namespace Kairos
 
             TimingPanel.Visibility = _s.ShowTimingInfo ? Visibility.Visible : Visibility.Collapsed;
             ResizeGrip.Visibility = _s.LockSize ? Visibility.Collapsed : Visibility.Visible;
+            var spotifyButtons = _spotify.IsConnected ? Visibility.Visible : Visibility.Collapsed;
+            AddToPlaylistButton.Visibility = spotifyButtons;
+            PlaylistsButton.Visibility = spotifyButtons;
             SyncNote.FontFamily = font;
             SyncNote.Foreground = other;
             SyncNote.TextAlignment = align;
@@ -686,6 +687,16 @@ namespace Kairos
             m.Items.Add(new Separator());
             m.Items.Add(Item("Reload lyrics", () => { if (_track != null) OnTrackChanged(_track, bypassCache: true); }));
             m.Items.Add(Item("Add or edit lyrics for this song…", () => OpenSettings("lyrics")));
+            m.Items.Add(new Separator());
+            if (_spotify.IsConnected)
+            {
+                m.Items.Add(Item("Add to playlist…", () => ShowPlaylistPicker(null)));
+                m.Items.Add(Item("Playlists…", OpenPlaylists));
+            }
+            else
+            {
+                m.Items.Add(Item("Connect Spotify for playlists…", () => OpenSettings("spotify")));
+            }
             m.Items.Add(Check("Show timing info", _s.ShowTimingInfo, v => _s.ShowTimingInfo = v));
             m.Items.Add(Item("Settings…\tCtrl ,", () => OpenSettings()));
             m.Items.Add(new Separator());
@@ -722,9 +733,10 @@ namespace Kairos
                 _settingsWindow.Activate();
                 return;
             }
-            _settingsWindow = new SettingsWindow(_s, ApplySettings, page,
+            _settingsWindow = new SettingsWindow(_s, ApplySettings, page, _spotify,
                 currentTrack: () => _track,
-                lyricsChanged: () => { if (_track != null) OnTrackChanged(_track); })
+                lyricsChanged: () => { if (_track != null) OnTrackChanged(_track); },
+                albumArt: () => _art)
             { Owner = this };
             _settingsWindow.Closed += (_, _) =>
             {
@@ -775,10 +787,157 @@ namespace Kairos
         private void AddLyricsButton_Click(object sender, RoutedEventArgs e) => OpenSettings("lyrics");
 
         // =================================================================
-        //  Album art
+        //  Spotify playlists
         // =================================================================
 
-        private bool ArtBackgroundActive => _s.AlbumArtBackground && _art != null;
+        private void AddToPlaylistButton_Click(object sender, RoutedEventArgs e) => ShowPlaylistPicker(AddToPlaylistButton);
+        private void PlaylistsButton_Click(object sender, RoutedEventArgs e) => OpenPlaylists();
+
+        private void OpenPlaylists()
+        {
+            if (!_spotify.IsConnected) { OpenSettings("spotify"); return; }
+            if (_playlistsWindow != null) { _playlistsWindow.Activate(); return; }
+            _playlistsWindow = new PlaylistsWindow(_spotify, _s.SpotifyUserName);
+            _playlistsWindow.Closed += (_, _) => _playlistsWindow = null;
+            _playlistsWindow.Show();
+        }
+
+        /// <summary>A small pop-up list of your playlists; click one to add the song that's playing.</summary>
+        private async void ShowPlaylistPicker(FrameworkElement? anchor)
+        {
+            if (!_spotify.IsConnected) { OpenSettings("spotify"); return; }
+
+            var list = new StackPanel();
+            var search = new TextBox
+            {
+                Style = (Style)FindResource("DarkText"),
+                FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI"),
+                FontSize = 13,
+                Margin = new Thickness(0, 0, 0, 8),
+                ToolTip = "Filter playlists",
+            };
+            var status = new TextBlock
+            {
+                Text = "Loading your playlists…",
+                Foreground = (Brush)FindResource("MutedBrush"),
+                FontSize = 12.5,
+                Margin = new Thickness(4, 6, 4, 8),
+                TextWrapping = TextWrapping.Wrap,
+            };
+            var scroller = new ScrollViewer
+            {
+                Content = list,
+                MaxHeight = 320,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            };
+
+            var body = new StackPanel { Width = 280 };
+            body.Children.Add(new TextBlock
+            {
+                Text = "Add to playlist",
+                FontSize = 14,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = (Brush)FindResource("TextBrush"),
+                Margin = new Thickness(4, 0, 0, 10),
+            });
+            body.Children.Add(search);
+            body.Children.Add(status);
+            body.Children.Add(scroller);
+
+            var popup = new Popup
+            {
+                PlacementTarget = anchor ?? (UIElement)this,
+                Placement = anchor != null ? PlacementMode.Bottom : PlacementMode.MousePoint,
+                VerticalOffset = 6,
+                StaysOpen = false,
+                AllowsTransparency = true,
+                PopupAnimation = PopupAnimation.Fade,
+                Child = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(0x1C, 0x1C, 0x1C)),
+                    BorderBrush = (Brush)FindResource("ControlBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(12),
+                    Padding = new Thickness(10),
+                    Child = body,
+                },
+            };
+            popup.IsOpen = true;
+            search.Focus();
+
+            List<PlaylistInfo> playlists;
+            try
+            {
+                playlists = (await _spotify.GetPlaylistsAsync()).Where(p => p.Editable).ToList();
+            }
+            catch (SpotifyException ex)
+            {
+                status.Text = ex.Message;
+                return;
+            }
+
+            void Fill()
+            {
+                list.Children.Clear();
+                var f = search.Text.Trim();
+                var shown = playlists.Where(p => f.Length == 0 || p.Name.Contains(f, StringComparison.OrdinalIgnoreCase)).ToList();
+                status.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+                status.Text = playlists.Count == 0 ? "You don't have any playlists you can add to yet." : "No playlists match.";
+
+                foreach (var p in shown)
+                {
+                    var row = new StackPanel();
+                    row.Children.Add(new TextBlock { Text = p.Name, Foreground = (Brush)FindResource("TextBrush"), FontSize = 13.5, TextTrimming = TextTrimming.CharacterEllipsis });
+                    row.Children.Add(new TextBlock { Text = p.Total == 1 ? "1 song" : $"{p.Total} songs", Foreground = (Brush)FindResource("MutedBrush"), FontSize = 11.5 });
+                    var item = new Border
+                    {
+                        Child = row,
+                        Padding = new Thickness(8, 6, 8, 6),
+                        CornerRadius = new CornerRadius(8),
+                        Background = Brushes.Transparent,
+                        Cursor = Cursors.Hand,
+                    };
+                    item.MouseEnter += (_, _) => item.Background = new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x2A));
+                    item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
+                    var target = p;
+                    item.MouseLeftButtonUp += async (_, _) =>
+                    {
+                        popup.IsOpen = false;
+                        await AddCurrentSongTo(target);
+                    };
+                    list.Children.Add(item);
+                }
+            }
+
+            search.TextChanged += (_, _) => Fill();
+            search.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) popup.IsOpen = false; };
+            Fill();
+        }
+
+        private async Task AddCurrentSongTo(PlaylistInfo playlist)
+        {
+            try
+            {
+                var current = await _spotify.GetCurrentTrackAsync();
+                if (current == null)
+                {
+                    Toast_Show("Nothing is playing in Spotify (or it's a podcast or ad).");
+                    return;
+                }
+                await _spotify.AddToPlaylistAsync(playlist.Id, current.Value.Uri);
+                Toast_Show($"Added to {playlist.Name}");
+            }
+            catch (SpotifyException ex)
+            {
+                Toast_Show(ex.Message);
+                if (!_spotify.IsConnected) ApplySettings(); // signed out: hide the buttons
+            }
+        }
+
+        // =================================================================
+        //  Album art
+        // =================================================================
 
         private async Task LoadAlbumArtAsync(TrackInfo track)
         {
@@ -814,68 +973,44 @@ namespace Kairos
             _art = image;
             _artAlbumKey = albumKey;
             if (image == null) _artHash = 0;
-            ApplySettingsArtOnly();
-        }
-
-        /// <summary>Re-applies just what depends on the artwork (cheaper than a full ApplySettings).</summary>
-        private void ApplySettingsArtOnly()
-        {
-            var bg = ParseColor(_s.BackgroundColor, Colors.Black);
-            double bgOpacity = ArtBackgroundActive ? Math.Clamp(_s.AlbumArtDim, 0, 1) : _s.BackgroundOpacity;
-            bg.A = (byte)Math.Clamp(Math.Round(bgOpacity * 255), 2, 255);
-            Frame.Background = new SolidColorBrush(bg);
             ApplyArtwork();
         }
 
+        /// <summary>Album art beside the title, the background layer, and the window colour that sits over it.</summary>
         private void ApplyArtwork()
         {
             bool thumb = _s.ShowAlbumArt && _art != null;
             ArtThumb.Visibility = thumb ? Visibility.Visible : Visibility.Collapsed;
             ArtThumb.Background = thumb ? new ImageBrush(_art) { Stretch = Stretch.UniformToFill } : null;
 
-            bool background = ArtBackgroundActive;
-            ArtHost.Visibility = background ? Visibility.Visible : Visibility.Collapsed;
-            ArtBackground.Source = background ? _art : null;
-            ArtBlur.Radius = Math.Clamp(_s.AlbumArtBlur, 0, 100);
-            UpdateArtClip();
-            UpdateArtAnimation(background && _s.AnimateAlbumArt);
+            // Keep the title aligned with the lyrics: centred text gets equal room on both sides of the cover.
+            double reserve = thumb ? ArtThumb.Width + 10 : 0;
+            TrackText.Margin = ParseAlignment(_s.TextAlignment) == System.Windows.TextAlignment.Center
+                ? new Thickness(reserve, 0, reserve, 0)
+                : new Thickness(reserve, 0, 0, 0);
+            TrackInfoPanel.MinHeight = thumb ? ArtThumb.Height : 0;
+
+            Bg.CornerRadius = Math.Max(0, _s.CornerRadius);
+            Bg.Update(_s, _art);
+            ApplyFrameBackground();
         }
 
-        private void UpdateArtClip()
+        /// <summary>
+        /// The window colour: on its own it's the background; over album art it's the dimming layer;
+        /// over a background image it's turned off (the image has its own tint).
+        /// </summary>
+        private void ApplyFrameBackground()
         {
-            double w = ArtHost.ActualWidth > 0 ? ArtHost.ActualWidth : ActualWidth;
-            double h = ArtHost.ActualHeight > 0 ? ArtHost.ActualHeight : ActualHeight;
-            double r = Math.Max(0, _s.CornerRadius);
-            ArtHost.Clip = new RectangleGeometry(new Rect(0, 0, Math.Max(0, w), Math.Max(0, h)), r, r);
-        }
-
-        /// <summary>A slow, gentle drift and zoom on the background artwork.</summary>
-        private void UpdateArtAnimation(bool run)
-        {
-            if (run == _artAnimating) return;
-            _artAnimating = run;
-
-            if (!run)
+            var bg = ParseColor(_s.BackgroundColor, Colors.Black);
+            double opacity = Bg.ActiveMode switch
             {
-                ArtScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-                ArtScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-                ArtShift.BeginAnimation(TranslateTransform.XProperty, null);
-                ArtShift.BeginAnimation(TranslateTransform.YProperty, null);
-                ArtScale.ScaleX = ArtScale.ScaleY = 1.15;
-                ArtShift.X = ArtShift.Y = 0;
-                return;
-            }
-
-            DoubleAnimation Drift(double from, double to, double seconds) => new(from, to, TimeSpan.FromSeconds(seconds))
-            {
-                AutoReverse = true,
-                RepeatBehavior = RepeatBehavior.Forever,
-                EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
+                "AlbumArt" => Math.Clamp(_s.AlbumArtDim, 0, 1),
+                "Image" => 0,
+                _ => _s.BackgroundOpacity,
             };
-            ArtScale.BeginAnimation(ScaleTransform.ScaleXProperty, Drift(1.15, 1.35, 24));
-            ArtScale.BeginAnimation(ScaleTransform.ScaleYProperty, Drift(1.15, 1.35, 24));
-            ArtShift.BeginAnimation(TranslateTransform.XProperty, Drift(-18, 18, 31));
-            ArtShift.BeginAnimation(TranslateTransform.YProperty, Drift(-10, 10, 19));
+            // Keep alpha ≥ 2: a fully transparent window lets clicks fall through to whatever is behind it.
+            bg.A = (byte)Math.Clamp(Math.Round(opacity * 255), 2, 255);
+            Frame.Background = new SolidColorBrush(bg);
         }
 
         private static BitmapImage? DecodeImage(byte[] bytes)
