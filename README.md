@@ -7,7 +7,6 @@
 
 A small Windows window that shows Spotify lyrics in time with the music, so they can stay on screen while I work.
 
-[![Build](https://img.shields.io/github/actions/workflow/status/nafthan/kairos/build.yml?style=flat-square&label=build&labelColor=121110&color=2F2C28)](../../actions)
 
 [Write-up](https://nafthan.co.uk/projects.html?open=kairos) · [Changelog](CHANGELOG.md)
 
