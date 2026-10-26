@@ -12,7 +12,7 @@ A small Windows window that shows Spotify lyrics in time with the music, so they
 
 </div>
 
-![Kairos](docs/screenshot.png)
+![Kairos](docs/preview.mp4)
 
 ## About
 
