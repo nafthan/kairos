@@ -165,6 +165,181 @@ namespace Kairos
 
         private static byte ClampByte(double v) => (byte)(v < 0 ? 0 : v > 255 ? 255 : v);
 
+        // =================================================================
+        //  Animated GIFs
+        // =================================================================
+
+        /// <summary>The frames of an animated GIF (already adjusted) and how long each one shows.</summary>
+        public sealed class Animation
+        {
+            public BitmapSource[] Frames { get; init; } = Array.Empty<BitmapSource>();
+            public TimeSpan[] Delays { get; init; } = Array.Empty<TimeSpan>();
+        }
+
+        private const int GifMaxFrames = 400;
+        private const long GifMaxBytes = 260L * 1024 * 1024; // keeps big GIFs from using too much memory
+        private const int GifMaxSide = 1000;
+
+        private static string? _animKey;
+        private static Animation? _anim;
+        private static readonly Dictionary<string, Task<Animation?>> AnimInFlight = new();
+
+        public static bool IsGif(string path) => path.EndsWith(".gif", StringComparison.OrdinalIgnoreCase);
+
+        public static Animation? TryGetCachedAnimation(Settings s)
+        {
+            lock (Lock) return _animKey == KeyFor(s) ? _anim : null;
+        }
+
+        public static Task<Animation?> GetAnimationAsync(Settings s)
+        {
+            string key = KeyFor(s);
+            string path = s.BackgroundImagePath;
+            double brightness = s.ImageBrightness, contrast = s.ImageContrast, saturation = s.ImageSaturation;
+
+            Task<Animation?> task;
+            lock (Lock)
+            {
+                if (_animKey == key) return Task.FromResult(_anim);
+                if (AnimInFlight.TryGetValue(key, out var running)) return running;
+                task = Task.Run(() =>
+                {
+                    try
+                    {
+                        var anim = MakeAnimation(path, brightness, contrast, saturation);
+                        lock (Lock) { _animKey = key; _anim = anim; }
+                        return anim;
+                    }
+                    catch { return null; }
+                    finally { lock (Lock) AnimInFlight.Remove(key); }
+                });
+                AnimInFlight[key] = task;
+            }
+            return task;
+        }
+
+        /// <summary>
+        /// Builds every full frame of a GIF. GIF frames often only redraw part of the picture and say what to do with
+        /// it afterwards (keep, clear, or restore), so each one is drawn onto a running canvas.
+        /// </summary>
+        internal static Animation? MakeAnimation(string path, double brightness, double contrast, double saturation)
+        {
+            if (!File.Exists(path)) return null;
+            using var fs = File.OpenRead(path);
+            var decoder = new GifBitmapDecoder(fs, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+            int count = Math.Min(decoder.Frames.Count, GifMaxFrames);
+            if (count == 0) return null;
+
+            // The whole picture's size ("logical screen"), falling back to the frames' extent.
+            int width = 0, height = 0;
+            try
+            {
+                if (decoder.Metadata is BitmapMetadata m)
+                {
+                    width = Num(m, "/logscrdesc/Width");
+                    height = Num(m, "/logscrdesc/Height");
+                }
+            }
+            catch { }
+            if (width <= 0 || height <= 0)
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    var f = decoder.Frames[i];
+                    var fm = f.Metadata as BitmapMetadata;
+                    width = Math.Max(width, Num(fm, "/imgdesc/Left") + f.PixelWidth);
+                    height = Math.Max(height, Num(fm, "/imgdesc/Top") + f.PixelHeight);
+                }
+            }
+            if (width <= 0 || height <= 0) return null;
+
+            // Scale big GIFs down so all the frames fit comfortably in memory.
+            double scale = Math.Min(1.0, (double)GifMaxSide / Math.Max(width, height));
+            double bytes = (double)count * width * height * 4 * scale * scale;
+            if (bytes > GifMaxBytes) scale *= Math.Sqrt(GifMaxBytes / bytes);
+            int outW = Math.Max(1, (int)Math.Round(width * scale));
+            int outH = Math.Max(1, (int)Math.Round(height * scale));
+
+            var canvas = new byte[width * height * 4];
+            var frames = new BitmapSource[count];
+            var delays = new TimeSpan[count];
+
+            for (int i = 0; i < count; i++)
+            {
+                var frame = decoder.Frames[i];
+                var meta = frame.Metadata as BitmapMetadata;
+                int left = Num(meta, "/imgdesc/Left"), top = Num(meta, "/imgdesc/Top");
+                int disposal = Num(meta, "/grctlext/Disposal");
+                int delay = Num(meta, "/grctlext/Delay") * 10; // stored in hundredths of a second
+                delays[i] = TimeSpan.FromMilliseconds(delay < 20 ? 100 : delay); // browsers treat tiny delays as 0.1 s
+
+                byte[]? before = disposal == 3 ? (byte[])canvas.Clone() : null;
+
+                // Draw this frame's pixels onto the canvas (GIF transparency is all-or-nothing).
+                var bgra = new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0);
+                int fw = bgra.PixelWidth, fh = bgra.PixelHeight;
+                var px = new byte[fw * fh * 4];
+                bgra.CopyPixels(px, fw * 4, 0);
+                for (int y = 0; y < fh; y++)
+                {
+                    int cy = top + y;
+                    if (cy < 0 || cy >= height) continue;
+                    for (int x = 0; x < fw; x++)
+                    {
+                        int cx = left + x;
+                        if (cx < 0 || cx >= width) continue;
+                        int si = (y * fw + x) * 4;
+                        if (px[si + 3] == 0) continue;
+                        int di = (cy * width + cx) * 4;
+                        canvas[di] = px[si]; canvas[di + 1] = px[si + 1]; canvas[di + 2] = px[si + 2]; canvas[di + 3] = px[si + 3];
+                    }
+                }
+
+                // This frame as shown: scaled, then adjusted.
+                var full = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, canvas, width * 4);
+                byte[] shown;
+                if (outW != width || outH != height)
+                {
+                    var scaled = new TransformedBitmap(full, new ScaleTransform((double)outW / width, (double)outH / height));
+                    var sw = scaled.PixelWidth; var sh = scaled.PixelHeight;
+                    shown = new byte[sw * sh * 4];
+                    new FormatConvertedBitmap(scaled, PixelFormats.Bgra32, null, 0).CopyPixels(shown, sw * 4, 0);
+                    frames[i] = Adjust(new Base(sw, sh, shown), brightness, contrast, saturation);
+                }
+                else
+                {
+                    frames[i] = Adjust(new Base(width, height, (byte[])canvas.Clone()), brightness, contrast, saturation);
+                }
+
+                // What happens before the next frame is drawn.
+                if (disposal == 2)
+                {
+                    // Clear this frame's area back to transparent.
+                    int x0 = Math.Max(0, left), x1 = Math.Min(width, left + fw);
+                    if (x1 > x0)
+                        for (int y = Math.Max(0, top); y < Math.Min(height, top + fh); y++)
+                            Array.Clear(canvas, (y * width + x0) * 4, (x1 - x0) * 4);
+                }
+                else if (disposal == 3 && before != null)
+                {
+                    canvas = before; // put back what was there before this frame
+                }
+            }
+
+            return new Animation { Frames = frames, Delays = delays };
+        }
+
+        private static int Num(BitmapMetadata? meta, string query)
+        {
+            try
+            {
+                if (meta == null || !meta.ContainsQuery(query)) return 0;
+                var v = meta.GetQuery(query);
+                return v == null ? 0 : Convert.ToInt32(v);
+            }
+            catch { return 0; }
+        }
+
         /// <summary>Forget everything (after the image file is replaced or removed).</summary>
         public static void Invalidate()
         {
@@ -172,6 +347,8 @@ namespace Kairos
             {
                 _basePath = null; _base = null; _resultKey = null; _result = null;
                 InFlight.Clear();
+                _animKey = null; _anim = null;
+                AnimInFlight.Clear();
             }
         }
     }

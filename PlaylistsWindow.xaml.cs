@@ -23,12 +23,18 @@ namespace Kairos
         private CancellationTokenSource? _loadCts;
         private readonly DispatcherTimer _toastTimer = new() { Interval = TimeSpan.FromSeconds(2.6) };
 
-        public PlaylistsWindow(SpotifyClient spotify, string? accountName)
+        private readonly Settings? _settings;
+        private readonly Action? _noLyricsChanged;
+
+        public PlaylistsWindow(SpotifyClient spotify, string? accountName, Settings? settings = null, Action? noLyricsChanged = null)
         {
             _spotify = spotify;
+            _settings = settings;
+            _noLyricsChanged = noLyricsChanged;
             InitializeComponent();
 
             AccountText.Text = string.IsNullOrEmpty(accountName) ? "" : $"Signed in as {accountName}";
+            LikedHint.Visibility = spotify.HasLibraryAccess ? Visibility.Collapsed : Visibility.Visible;
             _toastTimer.Tick += (_, _) =>
             {
                 _toastTimer.Stop();
@@ -105,7 +111,8 @@ namespace Kairos
             {
                 // Spotify only lets apps read the songs in playlists you own or collaborate on.
                 ShowMessage("Songs in this playlist can't be listed",
-                    "Spotify only shows apps the songs in playlists you made or collaborate on. You can still play it.");
+                    "Spotify only shows apps the songs in playlists you made or collaborate on. You can still play it. " +
+                    "If you do collaborate on it, press Refresh to check again.");
                 return;
             }
 
@@ -140,23 +147,40 @@ namespace Kairos
         private async void TrackList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
             if (_selected == null || TrackList.SelectedItem is not PlaylistTrack t) return;
-            try
-            {
-                await _spotify.PlayAsync(_selected.Uri, t.Uri);
-                ShowToast($"Playing \"{t.Title}\"");
-            }
-            catch (SpotifyException ex) { ShowToast(ex.Message); }
+            if (await PlaySelectedAsync(t)) ShowToast($"Playing \"{t.Title}\"");
         }
 
         private async void Play_Click(object sender, RoutedEventArgs e)
         {
             if (_selected == null) return;
+            if (await PlaySelectedAsync(null)) ShowToast($"Playing {_selected.Name}");
+        }
+
+        /// <summary>Plays the selected playlist, optionally from a particular song.</summary>
+        private async Task<bool> PlaySelectedAsync(PlaylistTrack? from)
+        {
+            if (_selected == null) return false;
             try
             {
-                await _spotify.PlayAsync(_selected.Uri, null);
-                ShowToast($"Playing \"{_selected.Name}\"");
+                await _spotify.PlayAsync(_selected.Uri, from?.Uri);
+                return true;
             }
-            catch (SpotifyException ex) { ShowToast(ex.Message); }
+            catch (SpotifyException ex)
+            {
+                if (_selected.IsLikedSongs && _tracks.Count > 0)
+                {
+                    // If Spotify won't play Liked Songs as a whole, play the songs themselves from this one on.
+                    try
+                    {
+                        int start = from == null ? 0 : Math.Max(0, _tracks.IndexOf(from));
+                        await _spotify.PlayTracksAsync(_tracks.Skip(start).Select(t => t.Uri));
+                        return true;
+                    }
+                    catch (SpotifyException ex2) { ShowToast(ex2.Message); return false; }
+                }
+                ShowToast(ex.Message);
+                return false;
+            }
         }
 
         private async void AddCurrent_Click(object sender, RoutedEventArgs e)
@@ -167,17 +191,102 @@ namespace Kairos
             {
                 var current = await _spotify.GetCurrentTrackAsync();
                 if (current == null) { ShowToast("Nothing is playing in Spotify (or it's a podcast or ad)."); return; }
-                if (_tracks.Any(t => t.Uri == current.Value.Uri))
+                bool already = _selected.IsLikedSongs
+                    ? await _spotify.IsLikedAsync(current.Value.Uri)
+                    : _tracks.Any(t => t.Uri == current.Value.Uri);
+                if (already)
                 {
                     ShowToast($"\"{current.Value.Name}\" is already in {_selected.Name}.");
                     return;
                 }
                 await _spotify.AddToPlaylistAsync(_selected.Id, current.Value.Uri);
-                ShowToast($"Added \"{current.Value.Name}\" to {_selected.Name}.");
+                ShowToast(_selected.IsLikedSongs
+                    ? $"Saved \"{current.Value.Name}\" to Liked Songs."
+                    : $"Added \"{current.Value.Name}\" to {_selected.Name}.");
                 await LoadTracksAsync(_selected);
             }
             catch (SpotifyException ex) { ShowToast(ex.Message); }
             finally { AddCurrentButton.IsEnabled = true; }
+        }
+
+        // ----- Shared playlists by link -----
+
+        private void AddSharedToggle_Click(object sender, RoutedEventArgs e)
+        {
+            bool show = AddSharedPanel.Visibility != Visibility.Visible;
+            AddSharedPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            AddSharedStatus.Text = "";
+            if (show)
+            {
+                // Handy: if a playlist link is already copied, paste it in.
+                try
+                {
+                    var clip = Clipboard.ContainsText() ? Clipboard.GetText() : "";
+                    if (SpotifyClient.ParsePlaylistId(clip) != null) SharedLinkBox.Text = clip.Trim();
+                }
+                catch { }
+                SharedLinkBox.Focus();
+                SharedLinkBox.SelectAll();
+            }
+        }
+
+        private void SharedLinkBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter) { AddShared_Click(sender, e); e.Handled = true; }
+        }
+
+        private async void AddShared_Click(object sender, RoutedEventArgs e)
+        {
+            AddSharedStatus.Text = "Adding…";
+            try
+            {
+                var name = await _spotify.AddSharedPlaylistAsync(SharedLinkBox.Text);
+                AddSharedStatus.Text = "";
+                SharedLinkBox.Text = "";
+                AddSharedPanel.Visibility = Visibility.Collapsed;
+                await LoadPlaylistsAsync(refresh: false);
+                var added = _playlists.FirstOrDefault(p => p.Name == name && p.AddedByLink);
+                if (added != null) PlaylistList.SelectedItem = added;
+                ShowToast(added?.Editable == true ? $"Added \"{name}\". You can add songs to it." : $"Added \"{name}\".");
+            }
+            catch (SpotifyException ex) { AddSharedStatus.Text = ex.Message; }
+        }
+
+        // ----- Playlists without lyrics -----
+
+        private void UpdateNoLyricsToggle()
+        {
+            bool show = _settings != null && _selected != null && !_selected.IsLikedSongs;
+            NoLyricsToggle.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            if (!show) return;
+            bool on = _settings!.NoLyricsPlaylists.ContainsKey(_selected!.Id);
+            NoLyricsToggle.Content = on ? "\u2713  No lyrics" : "Mark as no lyrics";
+            NoLyricsToggle.Foreground = on ? (Brush)FindResource("AccentBrush") : (Brush)FindResource("MutedBrush");
+        }
+
+        private void NoLyricsToggle_Click(object sender, RoutedEventArgs e)
+        {
+            if (_settings == null || _selected == null) return;
+            if (_settings.NoLyricsPlaylists.Remove(_selected.Id))
+                ShowToast($"Lyrics will show for {_selected.Name} again.");
+            else
+            {
+                _settings.NoLyricsPlaylists[_selected.Id] = _selected.Name;
+                ShowToast($"{_selected.Name} is marked as having no lyrics.");
+            }
+            _settings.Save();
+            UpdateNoLyricsToggle();
+            _noLyricsChanged?.Invoke();
+        }
+
+        private async void RemoveLink_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selected == null || !_selected.AddedByLink) return;
+            _spotify.RemoveSharedPlaylist(_selected.Id);
+            _selected = null;
+            ShowHeader(null);
+            TrackList.ItemsSource = null;
+            await LoadPlaylistsAsync(refresh: false);
         }
 
         // ----- Bits of UI -----
@@ -186,11 +295,23 @@ namespace Kairos
         {
             HeaderName.Text = p?.Name ?? "Playlists";
             HeaderSub.Text = p == null ? "Choose one on the left" : p.Subtitle + (p.Editable ? "" : "  ·  followed");
+            AddCurrentButton.Content = p?.IsLikedSongs == true ? "Save current song" : "Add current song";
+            RemoveLinkButton.Visibility = p?.AddedByLink == true ? Visibility.Visible : Visibility.Collapsed;
+            UpdateNoLyricsToggle();
             PlayButton.Visibility = p == null ? Visibility.Collapsed : Visibility.Visible;
             AddCurrentButton.Visibility = p?.Editable == true ? Visibility.Visible : Visibility.Collapsed;
 
             HeaderCover.Background = (Brush)FindResource("ControlBrush");
-            if (p?.ImageUrl != null)
+            HeaderCover.Child = null;
+            if (p?.IsLikedSongs == true)
+            {
+                var tile = MainWindow.CoverTile(null, liked: true, size: 104);
+                var heart = tile.Child;
+                tile.Child = null; // an element can only have one parent: detach before moving it
+                HeaderCover.Background = tile.Background;
+                HeaderCover.Child = heart;
+            }
+            else if (p?.ImageUrl != null)
             {
                 try
                 {

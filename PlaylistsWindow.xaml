@@ -31,8 +31,31 @@
                             </VisualBrush.Visual>
                         </VisualBrush>
                     </Border.OpacityMask>
-                    <Image Source="{Binding ImageUrl, TargetNullValue={x:Null}}" Stretch="UniformToFill"
-                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <Grid>
+                        <Image Source="{Binding ImageUrl, TargetNullValue={x:Null}}" Stretch="UniformToFill"
+                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                        <!-- Liked Songs: the purple heart tile -->
+                        <Border>
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsLikedSongs}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#450AF5" Offset="0"/>
+                                    <GradientStop Color="#C4EFD9" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <TextBlock Text="&#xEB52;" FontFamily="{StaticResource IconFont}" FontSize="16" Foreground="White"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </Grid>
                 </Border>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0,0,0">
                     <TextBlock Text="{Binding Name}" FontSize="13.5" TextTrimming="CharacterEllipsis"
@@ -93,6 +116,9 @@
                             <StackPanel>
                                 <TextBlock Text="Your playlists" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                                 <TextBlock x:Name="AccountText" FontSize="12" Foreground="{StaticResource FaintBrush}" Margin="0,2,0,0"/>
+                                <TextBlock x:Name="LikedHint" FontSize="12" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0"
+                                           TextWrapping="Wrap" Visibility="Collapsed"
+                                           Text="To see Liked Songs, reconnect Spotify in settings (one extra permission)."/>
                             </StackPanel>
                             <Button Style="{StaticResource CloseButton}" Content="&#xE72C;" ToolTip="Refresh"
                                     HorizontalAlignment="Right" VerticalAlignment="Top" Click="Refresh_Click"/>
@@ -101,6 +127,22 @@
                                  FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13"
                                  Margin="14,0,14,10" TextChanged="PlaylistSearch_TextChanged"
                                  ToolTip="Filter playlists"/>
+                        <StackPanel DockPanel.Dock="Bottom" Margin="14,4,14,14">
+                            <Button x:Name="AddSharedToggle" Style="{StaticResource TextButton}" HorizontalAlignment="Left"
+                                    Content="+  Add a shared playlist" Click="AddSharedToggle_Click"
+                                    ToolTip="For playlists you collaborate on that don't show up here"/>
+                            <StackPanel x:Name="AddSharedPanel" Visibility="Collapsed" Margin="0,6,0,0">
+                                <TextBlock Text="Paste the playlist's link (in Spotify: Share → Copy link to playlist)"
+                                           Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                <TextBox x:Name="SharedLinkBox" Style="{StaticResource DarkText}" KeyDown="SharedLinkBox_KeyDown"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <Button Style="{StaticResource PrimaryButton}" Content="Add" Padding="18,6" Click="AddShared_Click"/>
+                                    <Button Style="{StaticResource TextButton}" Content="Cancel" Margin="4,0,0,0" Click="AddSharedToggle_Click"/>
+                                </StackPanel>
+                                <TextBlock x:Name="AddSharedStatus" Foreground="{StaticResource MutedBrush}" FontSize="12"
+                                           TextWrapping="Wrap" Margin="0,6,0,0"/>
+                            </StackPanel>
+                        </StackPanel>
                         <ListBox x:Name="PlaylistList" Style="{StaticResource DarkList}"
                                  ItemContainerStyle="{StaticResource DarkListItem}"
                                  ItemTemplate="{StaticResource PlaylistTemplate}"
@@ -133,6 +175,12 @@
                                         Margin="0,0,8,0" Visibility="Collapsed"/>
                                 <Button x:Name="AddCurrentButton" Style="{StaticResource GhostButton}" Content="Add current song"
                                         Click="AddCurrent_Click" Visibility="Collapsed"/>
+                                <Button x:Name="NoLyricsToggle" Style="{StaticResource TextButton}" Margin="8,0,0,0"
+                                        Click="NoLyricsToggle_Click" Visibility="Collapsed"
+                                        ToolTip="For playlists without singing: Kairos skips the lyrics search and shows your no-lyrics visual"/>
+                                <Button x:Name="RemoveLinkButton" Style="{StaticResource TextButton}" Content="Remove from list"
+                                        Margin="8,0,0,0" Click="RemoveLink_Click" Visibility="Collapsed"
+                                        ToolTip="Stop showing this shared playlist in Kairos (it isn't deleted from Spotify)"/>
                             </StackPanel>
                         </StackPanel>
                         <Button Grid.Column="1" Style="{StaticResource CloseButton}" Content="&#xE8BB;" ToolTip="Close"

@@ -25,7 +25,15 @@ namespace Kairos
         public int Total { get; init; }
         /// <summary>You own it or it's collaborative, so songs can be added and its contents can be read.</summary>
         public bool Editable { get; init; }
-        public string Subtitle => Total > 0 ? $"{Total} songs  ·  {Owner}" : Owner;
+        /// <summary>The special "Liked Songs" collection rather than a real playlist.</summary>
+        public bool IsLikedSongs { get; init; }
+        /// <summary>Someone else's playlist that you can add to (you're a collaborator).</summary>
+        public bool IsShared { get; init; }
+        /// <summary>Added to Kairos by pasting its link.</summary>
+        public bool AddedByLink { get; init; }
+        public string Subtitle => IsLikedSongs
+            ? (Total == 1 ? "1 song" : $"{Total} songs")
+            : (Total > 0 ? $"{Total} songs  ·  {Owner}" : Owner) + (IsShared ? "  ·  shared with you" : "");
     }
 
     public sealed class PlaylistTrack
@@ -37,6 +45,18 @@ namespace Kairos
         public string Duration { get; init; } = "";
         public string Uri { get; init; } = "";
         public string? ImageUrl { get; init; }
+    }
+
+    /// <summary>A song from a Spotify search.</summary>
+    public sealed class SearchTrack
+    {
+        public string Title { get; init; } = "";
+        public string Artists { get; init; } = "";
+        public string Album { get; init; } = "";
+        public string? AlbumUri { get; init; }
+        public string Uri { get; init; } = "";
+        public string? ImageUrl { get; init; }
+        public string Duration { get; init; } = "";
     }
 
     public sealed class SpotifyException : Exception
@@ -59,7 +79,17 @@ namespace Kairos
 
         private const string Scopes =
             "playlist-read-private playlist-read-collaborative playlist-modify-private playlist-modify-public " +
-            "user-read-currently-playing user-read-playback-state user-modify-playback-state";
+            "user-read-currently-playing user-read-playback-state user-modify-playback-state " +
+            "user-library-read user-library-modify";
+
+        /// <summary>Id used for the Liked Songs collection in place of a playlist id.</summary>
+        public const string LikedSongsId = "liked-songs";
+
+        /// <summary>
+        /// Liked Songs needs two permissions added in Kairos 1.4. People who connected with an earlier version
+        /// are asked to reconnect once to grant them.
+        /// </summary>
+        public bool HasLibraryAccess => IsConnected && _s.SpotifyScopes.Contains("user-library-read") && _s.SpotifyScopes.Contains("user-library-modify");
 
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
 
@@ -134,6 +164,7 @@ namespace Kairos
 
                 _s.SpotifyClientId = clientId;
                 StoreTokens(token);
+                _playlistCache = null; // permissions may have changed (e.g. Liked Songs now allowed)
 
                 // Find out who we are, for the "Connected as …" line.
                 using var me = await GetJsonAsync("me", ct);
@@ -155,6 +186,7 @@ namespace Kairos
         {
             _s.SpotifyToken = "";
             _s.SpotifyUserName = "";
+            _s.SpotifyScopes = "";
             _accessToken = null;
             _userId = null;
             _playlistCache = null;
@@ -266,6 +298,8 @@ namespace Kairos
             {
                 var root = token.RootElement;
                 _accessToken = Str(root, "access_token");
+                var scope = Str(root, "scope");
+                if (!string.IsNullOrEmpty(scope)) _s.SpotifyScopes = scope; // what the user actually granted
                 int expires = root.TryGetProperty("expires_in", out var e) && e.TryGetInt32(out var x) ? x : 3600;
                 _accessExpires = DateTime.UtcNow.AddSeconds(expires - 60);
                 var refresh = Str(root, "refresh_token");
@@ -273,9 +307,24 @@ namespace Kairos
             }
         }
 
+        private readonly SemaphoreSlim _refreshGate = new(1, 1);
+
         private async Task<string> GetAccessTokenAsync(CancellationToken ct, bool forceRefresh = false)
         {
             if (!forceRefresh && _accessToken != null && DateTime.UtcNow < _accessExpires) return _accessToken;
+
+            // Only one renewal at a time; anyone else waiting just uses the fresh token.
+            await _refreshGate.WaitAsync(ct);
+            try
+            {
+                if (!forceRefresh && _accessToken != null && DateTime.UtcNow < _accessExpires) return _accessToken;
+                return await RenewAccessTokenAsync(ct);
+            }
+            finally { _refreshGate.Release(); }
+        }
+
+        private async Task<string> RenewAccessTokenAsync(CancellationToken ct)
+        {
             if (!IsConnected) throw new SpotifyException("Connect Spotify in settings first.");
 
             var refresh = Unprotect(_s.SpotifyToken);
@@ -319,6 +368,46 @@ namespace Kairos
             return (uri, Str(item, "name") ?? "");
         }
 
+        /// <summary>The album of the song playing now, as a spotify:album:… link (null if nothing is playing).</summary>
+        public async Task<string?> GetCurrentAlbumUriAsync(CancellationToken ct = default)
+        {
+            using var doc = await GetJsonAsync("me/player/currently-playing", ct, allowEmpty: true);
+            if (doc == null || !doc.RootElement.TryGetProperty("item", out var item) || item.ValueKind != JsonValueKind.Object) return null;
+            if (!item.TryGetProperty("album", out var album) || album.ValueKind != JsonValueKind.Object) return null;
+            var uri = Str(album, "uri");
+            return uri != null && uri.StartsWith("spotify:album:") ? uri : null;
+        }
+
+        /// <summary>Your Spotify profile, as a spotify:user:… link.</summary>
+        public async Task<string?> GetMyProfileUriAsync(CancellationToken ct = default)
+        {
+            if (_userId == null)
+            {
+                using var me = await GetJsonAsync("me", ct);
+                _userId = Str(me!.RootElement, "id");
+            }
+            return _userId == null ? null : $"spotify:user:{_userId}";
+        }
+
+        /// <summary>Your Spotify account's profile picture (the biggest size Spotify has), or null if you haven't set one.</summary>
+        public async Task<byte[]?> GetProfilePictureAsync(CancellationToken ct = default)
+        {
+            using var me = await GetJsonAsync("me", ct);
+            if (me == null || !me.RootElement.TryGetProperty("images", out var images) || images.ValueKind != JsonValueKind.Array)
+                return null;
+            string? best = null;
+            int bestWidth = -1;
+            foreach (var image in images.EnumerateArray())
+            {
+                var url = Str(image, "url");
+                if (string.IsNullOrEmpty(url)) continue;
+                int width = image.TryGetProperty("width", out var w) && w.ValueKind == JsonValueKind.Number ? w.GetInt32() : 0;
+                if (width > bestWidth) { best = url; bestWidth = width; }
+            }
+            if (best == null) return null;
+            return await Http.GetByteArrayAsync(best, ct);
+        }
+
         /// <summary>Your playlists (cached for a few minutes).</summary>
         public async Task<List<PlaylistInfo>> GetPlaylistsAsync(CancellationToken ct = default, bool refresh = false)
         {
@@ -331,33 +420,101 @@ namespace Kairos
                 _userId = Str(me!.RootElement, "id");
             }
 
-            var list = new List<PlaylistInfo>();
+            // Re-check which shared playlists you can edit once a week (or when you press Refresh).
+            if (refresh || DateTime.UtcNow - _s.SpotifyCanEditChecked > TimeSpan.FromDays(7))
+            {
+                _s.SpotifyCanEdit.Clear();
+                _s.SpotifyCanEditChecked = DateTime.UtcNow;
+            }
+
+            var raw = new List<RawPlaylist>();
             string? next = "me/playlists?limit=50";
-            while (next != null && list.Count < 1000)
+            while (next != null && raw.Count < 1000)
             {
                 using var page = await GetJsonAsync(next, ct);
                 var root = page!.RootElement;
                 if (root.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
-                {
                     foreach (var p in items.EnumerateArray())
-                    {
-                        if (p.ValueKind != JsonValueKind.Object) continue;
-                        string ownerId = p.TryGetProperty("owner", out var o) ? Str(o, "id") ?? "" : "";
-                        string ownerName = p.TryGetProperty("owner", out var o2) ? Str(o2, "display_name") ?? ownerId : "";
-                        bool collaborative = p.TryGetProperty("collaborative", out var c) && c.ValueKind == JsonValueKind.True;
-                        list.Add(new PlaylistInfo
-                        {
-                            Id = Str(p, "id") ?? "",
-                            Uri = Str(p, "uri") ?? "",
-                            Name = Str(p, "name") ?? "Untitled",
-                            Owner = ownerName,
-                            ImageUrl = FirstImage(p),
-                            Total = CountOf(p),
-                            Editable = ownerId == _userId || collaborative,
-                        });
-                    }
-                }
+                        if (p.ValueKind == JsonValueKind.Object) raw.Add(ReadPlaylist(p, byLink: false));
                 next = NextPage(root);
+            }
+
+            // Shared playlists added by link (Spotify leaves out ones you collaborate on but don't follow).
+            foreach (var id in _s.SpotifyExtraPlaylists.ToList())
+            {
+                if (raw.Any(r => r.Id == id)) continue;
+                try
+                {
+                    using var doc = await GetJsonAsync($"playlists/{id}", ct);
+                    raw.Add(ReadPlaylist(doc!.RootElement, byLink: true));
+                }
+                catch (SpotifyException e) when (e.Status == 404)
+                {
+                    _s.SpotifyExtraPlaylists.Remove(id); // deleted, or no longer shared
+                }
+                catch (SpotifyException) { }
+            }
+
+            // Playlists you don't own and that aren't marked collaborative may still be shared with you
+            // (Spotify's invite-a-collaborator feature doesn't set the flag). Check, a few at a time.
+            var unknown = raw.Where(r => r.OwnerId != _userId && !r.Collaborative && !_s.SpotifyCanEdit.ContainsKey(r.Id))
+                             .Take(60).ToList();
+            if (unknown.Count > 0)
+            {
+                using var gate = new SemaphoreSlim(5);
+                await Task.WhenAll(unknown.Select(async r =>
+                {
+                    await gate.WaitAsync(ct);
+                    try
+                    {
+                        var can = await CanEditAsync(r.Id, ct);
+                        if (can.HasValue) lock (_s.SpotifyCanEdit) _s.SpotifyCanEdit[r.Id] = can.Value;
+                    }
+                    finally { gate.Release(); }
+                }));
+                _s.Save();
+            }
+
+            var list = new List<PlaylistInfo>();
+            foreach (var r in raw)
+            {
+                bool owned = r.OwnerId == _userId;
+                bool shared = !owned && !r.Collaborative && _s.SpotifyCanEdit.TryGetValue(r.Id, out var can) && can;
+                list.Add(new PlaylistInfo
+                {
+                    Id = r.Id,
+                    Uri = r.Uri,
+                    Name = r.Name,
+                    Owner = r.OwnerName,
+                    ImageUrl = r.ImageUrl,
+                    Total = r.Total,
+                    Editable = owned || r.Collaborative || shared,
+                    IsShared = shared || (!owned && r.Collaborative),
+                    AddedByLink = r.ByLink,
+                });
+            }
+
+            // Liked Songs isn't a playlist in Spotify's API, but it belongs at the top of the list.
+            if (HasLibraryAccess)
+            {
+                int likedCount = 0;
+                try
+                {
+                    using var liked = await GetJsonAsync("me/tracks?limit=1", ct);
+                    if (liked!.RootElement.TryGetProperty("total", out var t) && t.TryGetInt32(out var n)) likedCount = n;
+                }
+                catch (SpotifyException) { /* still show it; the count is just a nicety */ }
+
+                list.Insert(0, new PlaylistInfo
+                {
+                    Id = LikedSongsId,
+                    Uri = $"spotify:user:{_userId}:collection",
+                    Name = "Liked Songs",
+                    Owner = "You",
+                    Total = likedCount,
+                    Editable = true,
+                    IsLikedSongs = true,
+                });
             }
 
             _playlistCache = list;
@@ -365,10 +522,62 @@ namespace Kairos
             return list;
         }
 
+        private sealed record RawPlaylist(string Id, string Uri, string Name, string OwnerId, string OwnerName,
+                                          string? ImageUrl, int Total, bool Collaborative, bool ByLink);
+
+        private static RawPlaylist ReadPlaylist(JsonElement p, bool byLink)
+        {
+            string ownerId = p.TryGetProperty("owner", out var o) ? Str(o, "id") ?? "" : "";
+            string ownerName = p.TryGetProperty("owner", out var o2) ? Str(o2, "display_name") ?? ownerId : "";
+            bool collaborative = p.TryGetProperty("collaborative", out var c) && c.ValueKind == JsonValueKind.True;
+            return new RawPlaylist(Str(p, "id") ?? "", Str(p, "uri") ?? "", Str(p, "name") ?? "Untitled",
+                                   ownerId, ownerName, FirstImage(p), CountOf(p), collaborative, byLink);
+        }
+
+        /// <summary>Spotify only lets apps read the songs of playlists you own or collaborate on, so that tells us.</summary>
+        private async Task<bool?> CanEditAsync(string playlistId, CancellationToken ct)
+        {
+            try
+            {
+                using var doc = await GetJsonAsync($"playlists/{playlistId}/items?limit=1", ct);
+                return doc!.RootElement.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array;
+            }
+            catch (SpotifyException e) when (e.Status == 403 || e.Status == 404) { return false; }
+            catch (SpotifyException) { return null; } // couldn't tell (network, busy): ask again later
+        }
+
+        /// <summary>Adds a playlist by its link (open.spotify.com/playlist/… or spotify:playlist:…). Returns its name.</summary>
+        public async Task<string> AddSharedPlaylistAsync(string linkOrId, CancellationToken ct = default)
+        {
+            var id = ParsePlaylistId(linkOrId) ?? throw new SpotifyException("That doesn't look like a Spotify playlist link. In Spotify, use Share → Copy link to playlist.");
+            using var doc = await GetJsonAsync($"playlists/{id}", ct);
+            var name = Str(doc!.RootElement, "name") ?? "Playlist";
+            if (!_s.SpotifyExtraPlaylists.Contains(id)) _s.SpotifyExtraPlaylists.Add(id);
+            _s.SpotifyCanEdit.Remove(id); // check it fresh
+            _s.Save();
+            _playlistCache = null;
+            return name;
+        }
+
+        public void RemoveSharedPlaylist(string id)
+        {
+            _s.SpotifyExtraPlaylists.Remove(id);
+            _s.Save();
+            _playlistCache = null;
+        }
+
+        public static string? ParsePlaylistId(string text)
+        {
+            text = text.Trim();
+            var m = System.Text.RegularExpressions.Regex.Match(text, @"playlist[/:]([A-Za-z0-9]{16,40})");
+            if (m.Success) return m.Groups[1].Value;
+            return System.Text.RegularExpressions.Regex.IsMatch(text, @"^[A-Za-z0-9]{22}$") ? text : null;
+        }
+
         public async Task<List<PlaylistTrack>> GetPlaylistTracksAsync(string playlistId, CancellationToken ct = default)
         {
             var tracks = new List<PlaylistTrack>();
-            string? next = $"playlists/{playlistId}/items?limit=50";
+            string? next = playlistId == LikedSongsId ? "me/tracks?limit=50" : $"playlists/{playlistId}/items?limit=50";
             while (next != null && tracks.Count < 5000)
             {
                 using var page = await GetJsonAsync(next, ct);
@@ -415,8 +624,182 @@ namespace Kairos
         public async Task AddToPlaylistAsync(string playlistId, string trackUri, CancellationToken ct = default)
         {
             var body = JsonSerializer.Serialize(new { uris = new[] { trackUri } });
+            if (playlistId == LikedSongsId)
+            {
+                if (!HasLibraryAccess) throw new SpotifyException("Reconnect Spotify in settings to use Liked Songs.");
+                // Saving to your library: Spotify URIs, sent both ways it accepts them.
+                await SendAsync(HttpMethod.Put, $"me/library?uris={Uri.EscapeDataString(trackUri)}", body, ct);
+                _playlistCache = null;
+                return;
+            }
             await SendAsync(HttpMethod.Post, $"playlists/{playlistId}/items", body, ct);
             _playlistCache = null; // song counts changed
+        }
+
+        /// <summary>Is this song already in your Liked Songs?</summary>
+        public async Task<bool> IsLikedAsync(string trackUri, CancellationToken ct = default)
+        {
+            if (!HasLibraryAccess) return false;
+            try
+            {
+                using var doc = await GetJsonAsync($"me/library/contains?uris={Uri.EscapeDataString(trackUri)}", ct);
+                var root = doc!.RootElement;
+                return root.ValueKind == JsonValueKind.Array && root.GetArrayLength() > 0 && root[0].ValueKind == JsonValueKind.True;
+            }
+            catch (SpotifyException)
+            {
+                return false; // not worth failing the add over
+            }
+        }
+
+        /// <summary>Plays a list of songs (used for Liked Songs if Spotify won't play it as a collection).</summary>
+        public async Task PlayTracksAsync(IEnumerable<string> trackUris, CancellationToken ct = default)
+        {
+            var uris = trackUris.Take(100).ToArray();
+            if (uris.Length == 0) return;
+            await SendAsync(HttpMethod.Put, "me/player/play", JsonSerializer.Serialize(new { uris }), ct);
+        }
+
+        /// <summary>
+        /// Where the playing song is playing from: ("playlist", id) for a playlist, or ("album"/"artist"/"collection", …).
+        /// Null if nothing is playing or Spotify doesn't say.
+        /// </summary>
+        public async Task<(string Type, string Id, string Uri)?> GetPlaybackContextAsync(CancellationToken ct = default)
+        {
+            using var doc = await GetJsonAsync("me/player/currently-playing", ct, allowEmpty: true);
+            if (doc == null || !doc.RootElement.TryGetProperty("context", out var c) || c.ValueKind != JsonValueKind.Object) return null;
+            var uri = Str(c, "uri");
+            var type = Str(c, "type") ?? "";
+            if (string.IsNullOrEmpty(uri)) return null;
+            if (uri.EndsWith(":collection")) return ("collection", LikedSongsId, uri);
+            var id = uri.Split(':').LastOrDefault() ?? "";
+            return (type, id, uri);
+        }
+
+        /// <summary>The playlist's name (for showing a playlist you marked by id).</summary>
+        public async Task<string?> GetPlaylistNameAsync(string id, CancellationToken ct = default)
+        {
+            var cached = _playlistCache?.FirstOrDefault(p => p.Id == id);
+            if (cached != null) return cached.Name;
+            try
+            {
+                using var doc = await GetJsonAsync($"playlists/{id}", ct);
+                return Str(doc!.RootElement, "name");
+            }
+            catch (SpotifyException) { return null; }
+        }
+
+        // ----- Spotify's own volume (used when Windows can't find Spotify's sound) -----
+
+        public async Task<int?> GetVolumeAsync(CancellationToken ct = default)
+        {
+            using var doc = await GetJsonAsync("me/player", ct, allowEmpty: true);
+            if (doc == null || !doc.RootElement.TryGetProperty("device", out var d) || d.ValueKind != JsonValueKind.Object) return null;
+            return d.TryGetProperty("volume_percent", out var v) && v.TryGetInt32(out var n) ? n : null;
+        }
+
+        public async Task SetVolumeAsync(int percent, CancellationToken ct = default) =>
+            await SendAsync(HttpMethod.Put, $"me/player/volume?volume_percent={Math.Clamp(percent, 0, 100)}", null, ct);
+
+        // ----- Search -----
+
+        /// <summary>Searches Spotify for songs and playlists (10 of each at a time; use offset for more).</summary>
+        public async Task<(List<SearchTrack> Tracks, List<PlaylistInfo> Playlists, bool MoreTracks, bool MorePlaylists)> SearchAsync(
+            string query, int trackOffset = 0, int playlistOffset = 0, bool tracks = true, bool playlists = true, CancellationToken ct = default)
+        {
+            var foundTracks = new List<SearchTrack>();
+            var foundPlaylists = new List<PlaylistInfo>();
+            bool moreTracks = false, morePlaylists = false;
+            if (string.IsNullOrWhiteSpace(query)) return (foundTracks, foundPlaylists, false, false);
+
+            async Task<JsonDocument> Search(string type, int offset) =>
+                (await GetJsonAsync($"search?q={Uri.EscapeDataString(query.Trim())}&type={type}&limit=10&offset={offset}", ct))!;
+
+            if (tracks)
+            {
+                using var doc = await Search("track", trackOffset);
+                if (doc.RootElement.TryGetProperty("tracks", out var t) && t.ValueKind == JsonValueKind.Object)
+                {
+                    if (t.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
+                        foreach (var item in items.EnumerateArray())
+                        {
+                            if (item.ValueKind != JsonValueKind.Object) continue;
+                            string artists = item.TryGetProperty("artists", out var a) && a.ValueKind == JsonValueKind.Array
+                                ? string.Join(", ", a.EnumerateArray().Select(x => Str(x, "name")).Where(n => !string.IsNullOrEmpty(n)))
+                                : "";
+                            string album = "", image = "";
+                            string? albumUri = null;
+                            if (item.TryGetProperty("album", out var al) && al.ValueKind == JsonValueKind.Object)
+                            {
+                                album = Str(al, "name") ?? "";
+                                albumUri = Str(al, "uri");
+                                image = SmallestImage(al) ?? "";
+                            }
+                            int ms = item.TryGetProperty("duration_ms", out var d) && d.TryGetInt32(out var v) ? v : 0;
+                            foundTracks.Add(new SearchTrack
+                            {
+                                Title = Str(item, "name") ?? "",
+                                Artists = artists,
+                                Album = album,
+                                AlbumUri = albumUri,
+                                Uri = Str(item, "uri") ?? "",
+                                ImageUrl = string.IsNullOrEmpty(image) ? null : image,
+                                Duration = ms > 0 ? $"{ms / 60000}:{ms / 1000 % 60:00}" : "",
+                            });
+                        }
+                    moreTracks = NextPage(t) != null;
+                }
+            }
+
+            if (playlists)
+            {
+                using var doc = await Search("playlist", playlistOffset);
+                if (doc.RootElement.TryGetProperty("playlists", out var pl) && pl.ValueKind == JsonValueKind.Object)
+                {
+                    if (pl.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
+                        foreach (var p in items.EnumerateArray())
+                        {
+                            if (p.ValueKind != JsonValueKind.Object) continue; // Spotify sometimes returns empty entries
+                            var r = ReadPlaylist(p, byLink: false);
+                            foundPlaylists.Add(new PlaylistInfo
+                            {
+                                Id = r.Id, Uri = r.Uri, Name = r.Name, Owner = r.OwnerName, ImageUrl = r.ImageUrl, Total = r.Total,
+                                Editable = _userId != null && r.OwnerId == _userId,
+                            });
+                        }
+                    morePlaylists = NextPage(pl) != null;
+                }
+            }
+            return (foundTracks, foundPlaylists, moreTracks, morePlaylists);
+        }
+
+        /// <summary>Plays one song, continuing through its album afterwards.</summary>
+        public async Task PlayTrackAsync(SearchTrack track, CancellationToken ct = default)
+        {
+            object payload = track.AlbumUri != null
+                ? new { context_uri = track.AlbumUri, offset = new { uri = track.Uri } }
+                : new { uris = new[] { track.Uri } };
+            await SendAsync(HttpMethod.Put, "me/player/play", JsonSerializer.Serialize(payload), ct);
+        }
+
+        public async Task QueueAsync(string uri, CancellationToken ct = default) =>
+            await SendAsync(HttpMethod.Post, $"me/player/queue?uri={Uri.EscapeDataString(uri)}", null, ct);
+
+        /// <summary>Saves a song to Liked Songs, or a playlist to your library.</summary>
+        public async Task SaveToLibraryAsync(string uri, CancellationToken ct = default)
+        {
+            if (uri.StartsWith("spotify:track:") && !HasLibraryAccess)
+                throw new SpotifyException("Reconnect Spotify in settings to use Liked Songs.");
+            var body = JsonSerializer.Serialize(new { uris = new[] { uri } });
+            await SendAsync(HttpMethod.Put, $"me/library?uris={Uri.EscapeDataString(uri)}", body, ct);
+            _playlistCache = null;
+        }
+
+        /// <summary>Jumps to a position in the playing song (used when Windows' own media controls can't seek).</summary>
+        public async Task SeekAsync(TimeSpan position, CancellationToken ct = default)
+        {
+            long ms = (long)Math.Max(0, position.TotalMilliseconds);
+            await SendAsync(HttpMethod.Put, $"me/player/seek?position_ms={ms}", null, ct);
         }
 
         /// <summary>Plays a playlist in Spotify, optionally starting at a particular song.</summary>
@@ -451,6 +834,7 @@ namespace Kairos
                 using var req = new HttpRequestMessage(method, url);
                 req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 if (json != null) req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+                else if (method != HttpMethod.Get) req.Content = new ByteArrayContent(Array.Empty<byte>()); // explicit empty body
 
                 HttpResponseMessage resp;
                 try { resp = await Http.SendAsync(req, ct); }
@@ -480,7 +864,7 @@ namespace Kairos
                     string message = "";
                     try { using var err = JsonDocument.Parse(body); message = err.RootElement.TryGetProperty("error", out var e) ? Str(e, "message") ?? "" : ""; } catch { }
 
-                    throw status switch
+                    var failure = status switch
                     {
                         403 when message.Contains("registered", StringComparison.OrdinalIgnoreCase) =>
                             new SpotifyException("Your Spotify account isn't on this developer app's user list. Add it under User Management in the Spotify dashboard."),
@@ -491,6 +875,7 @@ namespace Kairos
                         404 => new SpotifyException("Spotify couldn't find that playlist."),
                         _ => new SpotifyException(string.IsNullOrEmpty(message) ? $"Spotify error ({status})." : $"Spotify error: {message}"),
                     };
+                    throw new SpotifyException(failure.Message, status);
                 }
             }
         }

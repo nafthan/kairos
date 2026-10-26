@@ -8,7 +8,9 @@
         AllowsTransparency="True"
         Background="Transparent"
         ResizeMode="NoResize"
-        ShowInTaskbar="False"
+        ShowInTaskbar="True"
+        Icon="Kairos.ico"
+        MinWidth="720" MinHeight="520"
         WindowStartupLocation="CenterScreen"
         FontFamily="Segoe UI Variable Text, Segoe UI"
         FontSize="13"
@@ -36,7 +38,21 @@
                         MouseLeftButtonDown="DragArea_MouseLeftButtonDown">
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="20,22,16,22">
-                            <Image Source="Kairos.ico" Width="30" Height="30" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <!-- The logo drawn as shapes, so it stays sharp at any size and display scaling -->
+                            <Viewbox Width="30" Height="30" SnapsToDevicePixels="True">
+                                <Canvas Width="100" Height="100">
+                                    <Rectangle Width="100" Height="100" RadiusX="22.5" RadiusY="22.5">
+                                        <Rectangle.Fill>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Color="#202023" Offset="0"/>
+                                                <GradientStop Color="#0A0A0C" Offset="1"/>
+                                            </LinearGradientBrush>
+                                        </Rectangle.Fill>
+                                    </Rectangle>
+                                    <Path Fill="#1ED760" Data="M26,58 A24,24 0 0 1 74,58 Z"/>
+                                    <Rectangle Canvas.Left="16" Canvas.Top="56.5" Width="68" Height="11" RadiusX="5.5" RadiusY="5.5" Fill="#F2F2F2"/>
+                                </Canvas>
+                            </Viewbox>
                             <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
                                 <TextBlock Text="Kairos" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                                 <TextBlock Text="Settings" FontSize="12" Foreground="{StaticResource FaintBrush}" Margin="0,-1,0,0"/>
@@ -69,7 +85,7 @@
                     </Grid>
 
                     <!-- Live preview -->
-                    <Border Grid.Row="1" Margin="28,16,28,4" Height="150" CornerRadius="12" ClipToBounds="True">
+                    <Border x:Name="PreviewPanel" Grid.Row="1" Margin="28,16,28,4" Height="210" CornerRadius="12" ClipToBounds="True">
                         <Border.Background>
                             <!-- a stand-in "desktop" so background opacity is easy to judge -->
                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
@@ -79,20 +95,10 @@
                             </LinearGradientBrush>
                         </Border.Background>
                         <Grid>
-                            <TextBlock Text="PREVIEW" FontSize="10" FontWeight="SemiBold" Foreground="#80FFFFFF"
+                            <TextBlock Text="LIVE PREVIEW" FontSize="10" FontWeight="SemiBold" Foreground="#80FFFFFF"
                                        Margin="12,9,0,0" HorizontalAlignment="Left" VerticalAlignment="Top"/>
-                            <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Margin="16,14">
-                                <Grid x:Name="PreviewWindow" Width="340">
-                                    <local:BackgroundLayer x:Name="PreviewBg"/>
-                                    <Border x:Name="PreviewFrame" CornerRadius="12" Padding="16">
-                                        <StackPanel>
-                                            <TextBlock x:Name="PreviewPrev" TextWrapping="Wrap"/>
-                                            <TextBlock x:Name="PreviewCurrent" TextWrapping="Wrap"/>
-                                            <TextBlock x:Name="PreviewNext" TextWrapping="Wrap"/>
-                                        </StackPanel>
-                                    </Border>
-                                </Grid>
-                            </Viewbox>
+                            <!-- A miniature of your lyrics window, playing a sample song (filled in from code) -->
+                            <ContentControl x:Name="PreviewHost" Margin="16,26,16,14" Focusable="False"/>
                         </Grid>
                     </Border>
 
@@ -114,5 +120,13 @@
                 </Grid>
             </Grid>
         </Border>
+        <!-- Resize from the right edge, the bottom edge or the corner -->
+        <Thumb Style="{StaticResource ResizeEdge}" HorizontalAlignment="Right" Width="8" Margin="0,40,-4,40"
+               Cursor="SizeWE" DragDelta="ResizeRight_DragDelta" DragCompleted="Resize_DragCompleted"/>
+        <Thumb Style="{StaticResource ResizeEdge}" VerticalAlignment="Bottom" Height="8" Margin="40,0,40,-4"
+               Cursor="SizeNS" DragDelta="ResizeBottom_DragDelta" DragCompleted="Resize_DragCompleted"/>
+        <Thumb Style="{StaticResource ResizeCorner}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+               Width="18" Height="18" Margin="0,0,3,3" DragDelta="ResizeCorner_DragDelta" DragCompleted="Resize_DragCompleted"
+               ToolTip="Drag to resize"/>
     </Grid>
 </Window>

@@ -10,7 +10,7 @@ namespace Kairos
     /// <summary>
     /// Your own lyrics, kept as plain files you can also edit by hand:
     ///
-    ///     Kairos Lyrics\
+    ///     %APPDATA%\Kairos\Lyrics\
     ///         Artist Name\
     ///             Song Title.lrc    ← time-synced (lines start with [mm:ss.xx])
     ///             Other Song.txt    ← plain lyrics
@@ -20,10 +20,47 @@ namespace Kairos
     /// </summary>
     public static class LocalLyrics
     {
-        public sealed record Entry(string Artist, string Title, string Path, bool Synced);
+        public sealed record Entry(string Artist, string Title, string Path, bool Synced, bool NoLyrics = false);
 
-        public static string DefaultFolder =>
+        /// <summary>A song marked "this song has no lyrics" is an empty file with this extension.</summary>
+        public const string NoLyricsExtension = ".nolyrics";
+
+        /// <summary>Inside Kairos's own folder, next to its settings: %APPDATA%\Kairos\Lyrics.</summary>
+        public static string DefaultFolder => System.IO.Path.Combine(Settings.AppDataFolder, "Lyrics");
+
+        /// <summary>Where lyrics were kept before 1.9.</summary>
+        private static string OldDefaultFolder =>
             System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Kairos Lyrics");
+
+        /// <summary>
+        /// One-time move from Documents\Kairos Lyrics (before 1.9) into Kairos's own folder.
+        /// Only when the default folder is in use; a folder you chose yourself is left where it is.
+        /// </summary>
+        public static void MoveFromOldDefault(Settings s)
+        {
+            try
+            {
+                if (string.Equals(s.LyricsFolder, OldDefaultFolder, StringComparison.OrdinalIgnoreCase)) s.LyricsFolder = "";
+                if (!string.IsNullOrEmpty(s.LyricsFolder)) return;
+                if (!Directory.Exists(OldDefaultFolder)) return;
+
+                Directory.CreateDirectory(DefaultFolder);
+                foreach (var file in Directory.GetFiles(OldDefaultFolder, "*", SearchOption.AllDirectories))
+                {
+                    var relative = System.IO.Path.GetRelativePath(OldDefaultFolder, file);
+                    var target = System.IO.Path.Combine(DefaultFolder, relative);
+                    Directory.CreateDirectory(System.IO.Path.GetDirectoryName(target)!);
+                    if (!File.Exists(target)) File.Move(file, target);   // never overwrite anything already there
+                }
+                // Remove the old folder if everything moved out of it.
+                if (!Directory.EnumerateFiles(OldDefaultFolder, "*", SearchOption.AllDirectories).Any())
+                    Directory.Delete(OldDefaultFolder, recursive: true);
+            }
+            catch
+            {
+                // If it can't be moved (file in use, permissions), the old lyrics stay where they were.
+            }
+        }
 
         public static string FolderFor(Settings s) =>
             string.IsNullOrWhiteSpace(s.LyricsFolder) ? DefaultFolder : s.LyricsFolder;
@@ -50,16 +87,18 @@ namespace Kairos
                 {
                     if (!artistKeys.Contains(Normalize(System.IO.Path.GetFileName(dir)))) continue;
 
-                    string? plain = null;
+                    string? plain = null, none = null;
                     foreach (var file in Directory.GetFiles(dir))
                     {
                         var ext = System.IO.Path.GetExtension(file).ToLowerInvariant();
-                        if (ext != ".lrc" && ext != ".txt") continue;
+                        if (ext != ".lrc" && ext != ".txt" && ext != NoLyricsExtension) continue;
                         if (!titleKeys.Contains(Normalize(System.IO.Path.GetFileNameWithoutExtension(file)))) continue;
                         if (ext == ".lrc") return file; // synced wins
-                        plain ??= file;
+                        if (ext == ".txt") plain ??= file;
+                        else none ??= file;
                     }
                     if (plain != null) return plain;
+                    if (none != null) return none;
                 }
             }
             catch
@@ -73,6 +112,9 @@ namespace Kairos
         {
             try
             {
+                if (file.EndsWith(NoLyricsExtension, StringComparison.OrdinalIgnoreCase))
+                    return new Lyrics { IsInstrumental = true, Source = LyricsSource.Local };
+
                 var text = File.ReadAllText(file);
                 if (HasTimestamps(text))
                 {
@@ -109,8 +151,22 @@ namespace Kairos
 
             File.WriteAllText(path, text.Replace("\r\n", "\n").Replace("\n", "\r\n"), new UTF8Encoding(false));
             if (File.Exists(other)) File.Delete(other); // don't leave a stale copy in the other format
+            var marker = System.IO.Path.Combine(dir, name + NoLyricsExtension);
+            if (File.Exists(marker)) File.Delete(marker); // it has lyrics now
             return path;
         }
+
+        /// <summary>Remembers that a song has no lyrics, so Kairos stops looking and shows the filler instead.</summary>
+        public static string MarkNoLyrics(string folder, string artist, string title)
+        {
+            var dir = System.IO.Path.Combine(folder, SafeName(artist));
+            Directory.CreateDirectory(dir);
+            var path = System.IO.Path.Combine(dir, SafeName(title) + NoLyricsExtension);
+            File.WriteAllText(path, "Marked in Kairos as having no lyrics. Delete this file to undo.\r\n");
+            return path;
+        }
+
+        public static void UnmarkNoLyrics(string file) => Delete(file);
 
         public static List<Entry> List(string folder)
         {
@@ -123,8 +179,9 @@ namespace Kairos
                     foreach (var file in Directory.GetFiles(dir).OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
                     {
                         var ext = System.IO.Path.GetExtension(file).ToLowerInvariant();
-                        if (ext != ".lrc" && ext != ".txt") continue;
-                        result.Add(new Entry(System.IO.Path.GetFileName(dir), System.IO.Path.GetFileNameWithoutExtension(file), file, ext == ".lrc"));
+                        if (ext != ".lrc" && ext != ".txt" && ext != NoLyricsExtension) continue;
+                        result.Add(new Entry(System.IO.Path.GetFileName(dir), System.IO.Path.GetFileNameWithoutExtension(file), file,
+                                             ext == ".lrc", ext == NoLyricsExtension));
                     }
                 }
             }
@@ -181,6 +238,44 @@ namespace Kairos
                 }
             }
             return new ImportGuess(artist, title, text);
+        }
+
+        // ----- Syncing -----
+
+        /// <summary>
+        /// The lines to time, from pasted text: time tags and [ar:]-style tags removed, blank lines dropped
+        /// (they're just gaps between verses, and there's nothing to tap for them).
+        /// </summary>
+        public static List<string> LinesForSync(string text)
+        {
+            var result = new List<string>();
+            foreach (var raw in text.Replace("\r", "").Split('\n'))
+            {
+                if (MetaTag.IsMatch(raw.Trim())) continue;
+                var line = TimeTag.Replace(raw, "").Trim();
+                if (line.Length > 0) result.Add(line);
+            }
+            return result;
+        }
+
+        /// <summary>Builds .lrc text: [ar:]/[ti:] tags, then "[mm:ss.xx]line" for each line.</summary>
+        public static string BuildLrc(string artist, string title, IEnumerable<(TimeSpan Time, string Text)> lines)
+        {
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(artist)) sb.Append("[ar:").Append(artist.Trim()).Append("]\n");
+            if (!string.IsNullOrWhiteSpace(title)) sb.Append("[ti:").Append(title.Trim()).Append("]\n");
+            sb.Append("[by:Kairos]\n");
+            foreach (var (time, text) in lines)
+                sb.Append('[').Append(FormatTag(time)).Append(']').Append(text).Append('\n');
+            return sb.ToString();
+        }
+
+        /// <summary>"mm:ss.xx", the usual .lrc time format (hundredths of a second).</summary>
+        public static string FormatTag(TimeSpan t)
+        {
+            if (t < TimeSpan.Zero) t = TimeSpan.Zero;
+            long cs = (long)Math.Round(t.TotalMilliseconds / 10.0);
+            return $"{cs / 6000:00}:{cs / 100 % 60:00}.{cs % 100:00}";
         }
 
         // ----- Helpers -----

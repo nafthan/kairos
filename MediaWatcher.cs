@@ -149,6 +149,8 @@ namespace Kairos
             }
         }
 
+        public async Task PlayAsync() { try { if (_session != null) await _session.TryPlayAsync(); } catch { } }
+        public async Task PauseAsync() { try { if (_session != null) await _session.TryPauseAsync(); } catch { } }
         public async Task TogglePlayPauseAsync() { try { if (_session != null) await _session.TryTogglePlayPauseAsync(); } catch { } }
         public async Task NextAsync() { try { if (_session != null) await _session.TrySkipNextAsync(); } catch { } }
         public async Task PreviousAsync() { try { if (_session != null) await _session.TrySkipPreviousAsync(); } catch { } }

@@ -21,23 +21,33 @@
 
         <!-- Window background (colour, opacity and corner radius come from settings) -->
         <Border x:Name="Frame" CornerRadius="12" Background="#D9121212" Padding="16">
-            <Grid>
+            <Grid x:Name="ContentGrid">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
+                <!-- An optional panel (and border) behind the lyrics: settings → Layout -->
+                <Border x:Name="LyricsPanel" Grid.Row="1" Visibility="Collapsed" IsHitTestVisible="False"/>
+
                 <!-- Song title and artist -->
                 <!-- The text spans the full width (with equal space reserved on both sides when the cover shows),
                      so centred titles line up with the centred lyrics. -->
-                <Grid x:Name="TrackInfoPanel" Grid.Row="0" Margin="0,0,0,8" IsHitTestVisible="False" MinHeight="42">
-                    <Border x:Name="ArtThumb" Width="42" Height="42" CornerRadius="6"
+                <Grid x:Name="TrackInfoPanel" Grid.Row="0" Margin="0,0,0,8" MinHeight="42">
+                    <Border x:Name="ArtThumb" Width="42" Height="42" CornerRadius="6" IsHitTestVisible="False"
                             HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="Collapsed">
                         <Border.Effect>
                             <DropShadowEffect BlurRadius="8" ShadowDepth="1" Opacity="0.4"/>
                         </Border.Effect>
                     </Border>
-                <StackPanel x:Name="TrackText" VerticalAlignment="Center">
+                    <!-- Your profile picture (settings → Layout), on the right in the standard layout -->
+                    <Border x:Name="ProfileThumb" Width="42" Height="42" CornerRadius="21" IsHitTestVisible="False"
+                            HorizontalAlignment="Right" VerticalAlignment="Center" Visibility="Collapsed">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="8" ShadowDepth="1" Opacity="0.4"/>
+                        </Border.Effect>
+                    </Border>
+                <StackPanel x:Name="TrackText" VerticalAlignment="Center" IsHitTestVisible="False">
                     <TextBlock x:Name="TrackTitle" FontWeight="SemiBold" FontSize="13" Foreground="White"
                                TextTrimming="CharacterEllipsis"/>
                     <TextBlock x:Name="TrackArtist" FontSize="11.5" Foreground="White" Opacity="0.6"
@@ -69,6 +79,18 @@
                     </StackPanel>
                 </ScrollViewer>
 
+                <!-- Cover and profile picture placed anywhere (custom layouts) -->
+                <Border x:Name="FreeArt" Visibility="Collapsed" IsHitTestVisible="False">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="10" ShadowDepth="1.5" Opacity="0.45"/>
+                    </Border.Effect>
+                </Border>
+                <Border x:Name="FreeProfile" Visibility="Collapsed" IsHitTestVisible="False">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="10" ShadowDepth="1.5" Opacity="0.45"/>
+                    </Border.Effect>
+                </Border>
+
                 <!-- Status messages: "Play a song in Spotify", "Finding lyrics…", etc. -->
                 <StackPanel x:Name="StatusPanel" Grid.Row="1" VerticalAlignment="Center"
                             HorizontalAlignment="Stretch">
@@ -76,9 +98,13 @@
                                Foreground="White" FontSize="16" FontWeight="SemiBold"/>
                     <TextBlock x:Name="StatusSubText" TextAlignment="Center" TextWrapping="Wrap" IsHitTestVisible="False"
                                Foreground="White" Opacity="0.55" FontSize="12" Margin="0,4,0,0"/>
-                    <Button x:Name="AddLyricsButton" Style="{StaticResource PillButton}" Content="Add lyrics for this song"
-                            HorizontalAlignment="Center" Margin="0,12,0,0" Visibility="Collapsed"
-                            Click="AddLyricsButton_Click"/>
+                    <StackPanel x:Name="NoLyricsButtons" Orientation="Horizontal" HorizontalAlignment="Center"
+                                Margin="0,12,0,0" Visibility="Collapsed">
+                        <Button x:Name="AddLyricsButton" Style="{StaticResource PillButton}" Content="Add lyrics"
+                                Click="AddLyricsButton_Click"/>
+                        <Button x:Name="NoLyricsButton" Style="{StaticResource PillGhostButton}" Content="This song has no lyrics"
+                                Margin="8,0,0,0" Click="NoLyricsButton_Click"/>
+                    </StackPanel>
                 </StackPanel>
             </Grid>
         </Border>
@@ -97,8 +123,11 @@
                 <Button x:Name="PlayPauseButton" Content="&#xE768;" ToolTip="Play / pause" Click="PlayPauseButton_Click"/>
                 <Button x:Name="NextButton" Content="&#xE893;" ToolTip="Next" Click="NextButton_Click"/>
                 <Border Width="1" Margin="4,5" Background="#40FFFFFF"/>
+                <Button x:Name="SearchButton" Content="&#xE721;" ToolTip="Search Spotify (Ctrl+F)" Click="SearchButton_Click" Visibility="Collapsed"/>
                 <Button x:Name="AddToPlaylistButton" Content="&#xE710;" ToolTip="Add to playlist" Click="AddToPlaylistButton_Click" Visibility="Collapsed"/>
                 <Button x:Name="PlaylistsButton" Content="&#xE8FD;" ToolTip="Playlists" Click="PlaylistsButton_Click" Visibility="Collapsed"/>
+                <Button x:Name="MiniButton" Content="&#xE73F;" ToolTip="Mini mode (Ctrl+Alt+M)" Click="MiniButton_Click"/>
+                <Button x:Name="VolumeButton" Content="&#xE767;" ToolTip="Spotify volume (or Ctrl + scroll)" Click="VolumeButton_Click"/>
                 <Button x:Name="MoreButton" Content="&#xE712;" ToolTip="Settings" Click="MoreButton_Click"/>
                 <Button x:Name="CloseButton" Content="&#xE8BB;" ToolTip="Close" Click="CloseButton_Click"/>
             </StackPanel>

@@ -165,6 +165,35 @@ namespace Kairos
             return candidates.Count == 0 ? null : FromJson(candidates[0].Element);
         }
 
+        public sealed record SearchResult(string Title, string Artist, string Album, int DurationSeconds, bool Synced, string Text);
+
+        /// <summary>A free-text search of the online lyrics library, for picking a match by hand.</summary>
+        public async Task<List<SearchResult>> SearchManyAsync(string query, CancellationToken ct = default)
+        {
+            var results = new List<SearchResult>();
+            if (string.IsNullOrWhiteSpace(query)) return results;
+
+            using var resp = await Http.GetAsync($"api/search?q={Uri.EscapeDataString(query.Trim())}", ct);
+            if (resp.StatusCode == HttpStatusCode.NotFound) return results;
+            resp.EnsureSuccessStatusCode();
+
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return results;
+
+            foreach (var e in doc.RootElement.EnumerateArray().Take(25))
+            {
+                bool synced = HasString(e, "syncedLyrics");
+                bool plain = HasString(e, "plainLyrics");
+                if (!synced && !plain) continue;
+                string Get(string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+                int dur = e.TryGetProperty("duration", out var d) && d.ValueKind == JsonValueKind.Number ? (int)Math.Round(d.GetDouble()) : 0;
+                results.Add(new SearchResult(Get("trackName"), Get("artistName"), Get("albumName"), dur, synced,
+                    synced ? Get("syncedLyrics") : Get("plainLyrics")));
+            }
+            // Synced versions first: they're the ones that follow the song.
+            return results.OrderByDescending(r => r.Synced).ToList();
+        }
+
         private static Lyrics FromJson(JsonElement e)
         {
             bool instrumental = e.TryGetProperty("instrumental", out var i) && i.ValueKind == JsonValueKind.True;

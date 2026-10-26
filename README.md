@@ -1,94 +1,112 @@
-# Kairos
+<div align="center">
 
-*Kairos (καιρός): the ancient Greek idea of the right moment, as opposed to chronos, clock time.*
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/banner-dark.gif">
+  <img alt="Kairos" src="docs/banner-light.gif" width="100%">
+</picture>
 
-A small, always-on-top window for Windows that shows Spotify lyrics in time with the music, so you can keep them on screen while you work instead of the full Spotify window.
+A small Windows window that shows Spotify lyrics in time with the music, so they can stay on screen while I work.
+
+[![Build](https://img.shields.io/github/actions/workflow/status/nafthan/kairos/build.yml?style=flat-square&label=build&labelColor=121110&color=2F2C28)](../../actions)
+
+[Write-up](https://nafthan.co.uk/projects.html?open=kairos) · [Changelog](CHANGELOG.md)
+
+</div>
+
+![Kairos](docs/screenshot.png)
+
+## About
+
+I listen to music most of the day, and I like following the lyrics, but Spotify's own lyrics view takes over the whole app. I wanted the lyrics in a small window that sits on top of whatever I'm doing, with the line being sung kept in the middle, and nothing else in the way.
+
+The name comes from the Greek idea of *kairos*, the right moment, as opposed to *chronos*, clock time. That's the whole job: show the right line at the right moment.
+
+The one decision that shaped it: no third-party packages. Everything is built on what Windows already has, from its media controls and audio system to its own video encoder, so Kairos is a single small program with nothing else to install.
 
 ## Features
 
-- The line being sung is highlighted and kept centred, gliding smoothly from line to line.
-- Album art beside the title, or blurred behind the lyrics with a slow drift.
-- Your own background image, with brightness, contrast, saturation, blur, opacity, tint, fit, zoom and position controls.
-- Optional Spotify connection: add the playing song to a playlist in one click, and browse and play your playlists.
-- Your own lyrics folder for songs the online library doesn't have, with import from `.lrc` and `.txt` files.
-- Fully customisable: fonts, sizes, colours, themes (including your own), opacity, shape and behaviour, all previewed live.
-- Drag to move, resize from the corner, lock position and size, click a line to jump to it, scroll to browse.
-- No third-party packages, and no Spotify login unless you turn on the playlist features.
+- Lyrics that follow the song, with the current line centred and highlighted, and a click on any line to jump to it
+- Fully customisable: fonts, colours, glow, karaoke fill, focus blur and a beat pulse, with themes I can save and switch between
+- Backgrounds: a colour, my own picture or GIF, the album art, or a colour dance that moves with the music
+- A layout editor, where I drag the lyrics, title, album cover and profile picture anywhere in the window
+- Mini mode, a subtitle-style strip with just the line being sung
+- Click-through, so the window never gets in the way, and it fades out while a full-screen app is on the same screen
+- Lyric cards: share a line or a few as a picture, a GIF, or an MP4 with the song playing
+- My own lyrics for songs the online library doesn't have, with a tap-along tool to time them
+- Spotify extras: add the song to a playlist or Liked Songs, browse playlists, search, and control Spotify's volume
+- Listening statistics, kept only on my PC
 
-## Download
+<table>
+  <tr>
+    <td width="50%"><img alt="The layout editor" src="docs/layout-editor.png"></td>
+    <td width="50%"><img alt="A lyric card" src="docs/lyric-card.png"></td>
+  </tr>
+</table>
 
-Get **Kairos.exe** from the [Releases](../../releases) page and run it; there's nothing to install.
-It needs the .NET 10 Desktop Runtime: if it's missing, Windows will offer to download it the first time you open Kairos.
+## Getting started
 
-Kairos isn't signed by a publisher, so Windows may show "Windows protected your PC" the first time. Click **More info**, then **Run anyway**.
+Kairos isn't available to download yet. I'm sharing the code so you can see how it's put together.
 
-## Using it
+### Requirements
 
-- Play a song in the Spotify desktop app.
-- **Hover** for previous / play-pause / next, settings and close. **Right-click** for quick options.
-- **Click a line** to jump to it. **Scroll** to browse; *Back to current line* (or Esc) resumes following.
-- Keyboard, when the window is focused: `Ctrl +` / `Ctrl −` text size, `[` / `]` lyrics later / earlier, `Space` play/pause, `Ctrl ,` settings.
+- Windows 10 (version 2004 or later) or Windows 11
+- The .NET 10 Desktop Runtime
+- The Spotify desktop app
+- For the playlist features: Spotify Premium and your own free Spotify developer app
 
-## Your own lyrics
+## Usage
 
-When a song has no lyrics online, click **Add lyrics for this song**, or open settings → **My lyrics**. Paste the lyrics or import files, and Kairos saves them as:
+Play a song in Spotify and the lyrics appear. Hover over the window for its controls, and right-click for quick options.
 
-```
-Documents\Kairos Lyrics\
-    Artist Name\
-        Song Title.lrc    time-synced: each line starts with a tag like [01:23.45]
-        Other Song.txt    plain lyrics
-```
-
-You can also add or edit files there directly. Your own lyrics are always used ahead of the online library. Matching ignores capitals, accents, punctuation and suffixes like "- Remastered 2011". When importing several files at once, each file needs `[ar:]` and `[ti:]` tags or a name like `Artist - Song.lrc`.
-
-## Playlists (optional)
-
-Adding songs to playlists and browsing them uses Spotify's Web API, so it needs a little one-time setup. Spotify requires each person to register their own free developer app, and it needs **Spotify Premium**.
-
-1. Open settings → **Spotify** and follow the four steps: create an app in the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard), add the redirect address `http://127.0.0.1:43821/callback`, tick **Web API**, and copy the app's Client ID.
-2. Paste the Client ID into Kairos and click **Connect**, then approve access in your browser.
-
-Afterwards, hover over the lyrics window: **+** adds the playing song to a playlist and the list button opens your playlists. Both are in the right-click menu too. Kairos never sees your password, and the sign-in is stored encrypted for your Windows account only. Spotify only lets apps list the songs in playlists you made or collaborate on; followed playlists can still be played.
-
-## Where things are saved
-
-| What | Where |
+| Key or action | What it does |
 |---|---|
-| Settings and saved themes | `%APPDATA%\Kairos\settings.json` |
-| Lyrics looked up online (cache) | `%APPDATA%\Kairos\cache-v2` |
-| Your own lyrics | `Documents\Kairos Lyrics` (can be changed in settings) |
-| Background image (a copy of the one you chose) | `%APPDATA%\Kairos\backgrounds` |
-| Spotify sign-in (encrypted) | inside `settings.json`, readable only by your Windows account |
+| Click a line | Jumps to that point in the song |
+| Scroll | Browses the lyrics; `Esc` goes back to the current line |
+| `Space` | Play or pause |
+| `[` and `]` | Lyrics a little later or earlier |
+| `Ctrl` + `+` / `−` | Larger or smaller text |
+| `Ctrl` + scroll | Spotify's volume |
+| `Ctrl` + `,` | Settings |
+| `Ctrl` + `Alt` + `C` | Centres the window left to right, from any app |
+| `Ctrl` + `Alt` + `M` | Mini mode on or off, from any app |
+| `Ctrl` + `Alt` + `T` | Click-through on or off, from any app (hold `Ctrl` to use the window) |
 
 ## How it works
 
-- **What's playing and the album art** come from Windows' built-in media controls, the same source as the volume-key media overlay.
-- **Playlists** (if you connect Spotify) use Spotify's Web API with your own developer app.
-- **Lyrics** come from your own folder first, then [LRCLIB](https://lrclib.net), a free and open database of time-synced lyrics. Spotify doesn't make its own lyrics available to other apps.
-- **Spotify Canvas** videos aren't available to other apps, so Kairos can't show them; the album art background is the closest alternative.
+Windows already knows what Spotify is playing and how far through the song it is, through the same media controls behind the volume overlay. Kairos reads that, keeps its own clock between updates so the highlight moves smoothly, and looks the lyrics up in my own lyrics folder first, then on [LRCLIB](https://lrclib.net), a free, open library of time-synced lyrics. Spotify doesn't let other apps use its own lyrics.
 
-## Troubleshooting
+| Part | What it does |
+|---|---|
+| `MediaWatcher.cs` | Follows what's playing and where, through Windows' media controls |
+| `LyricsService.cs`, `LocalLyrics.cs` | Finds lyrics: my folder first, then LRCLIB, with a cache |
+| `MainWindow.xaml(.cs)` | The lyrics window: following the song, effects, menus and shortcuts |
+| `LayoutEngine.cs`, `LayoutEditor.cs` | Places the lyrics, title and pictures, and the drag-and-drop editor for them |
+| `BackgroundLayer.cs`, `ImageProcessor.cs` | Backgrounds: pictures, GIFs, album art and the colour dance |
+| `SpotifyClient.cs` | The optional Spotify connection, for playlists, search and Liked Songs |
+| `SpotifyApp.cs`, `AudioMixer.cs` | Opening, hiding and closing Spotify alongside Kairos, and its volume |
+| `LyricCard.cs`, `GifEncoder.cs`, `Mp4Writer.cs`, `AudioRecorder.cs` | Lyric cards, and writing them out as GIFs and MP4s with the song's sound |
+| `SettingsWindow.xaml(.cs)`, `LivePreview.cs` | Settings, with a live preview playing a sample song |
 
-- **"Play a song in Spotify" stays up:** use the Spotify desktop app (not the web player) and make sure a song is playing.
-- **Lyrics slightly early or late:** press `[` or `]`, or adjust *Lyrics timing* in settings.
-- **Lines aren't highlighting or following:** the note under the song title says if the lyrics aren't time-synced. Otherwise, right-click → *Show timing info* and compare the position with Spotify's.
-- **Clicking a line doesn't seek:** Spotify sometimes ignores seek requests from other apps; Kairos tells you when it does.
-- **Wrong lyrics:** right-click → *Reload lyrics*, or add your own.
+## Security and privacy
 
-## Building from source
+- Settings, themes, my lyrics and listening statistics are stored only on my PC, in `%APPDATA%\Kairos`.
+- Song titles and artists are sent to LRCLIB to look up lyrics. With the Spotify connection on, requests go to Spotify's own Web API.
+- The Spotify sign-in uses my own developer app, so my password never passes through Kairos, and the sign-in is stored encrypted so only my Windows account can read it.
+- Nothing is collected: no accounts, analytics or tracking of any kind.
 
-1. Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (Windows x64).
-2. Double-click `build.bat`, or run:
-   ```
-   dotnet publish Kairos.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o publish
-   ```
-3. The app is at `publish\Kairos.exe`.
+## Limitations
 
-## Releasing a new version
+- It only works with the Spotify desktop app, not the web player, because it relies on Windows' media controls.
+- Lyrics come from LRCLIB, so some songs have none, or plain lyrics without timings. I can add my own and time them.
+- Spotify Canvas videos aren't available to other apps, so the album art background is the closest I can get.
+- The playlist features need Spotify Premium and a developer app of your own, because of how Spotify limits its Web API.
+- Recording a song's sound for a lyric card video happens in real time, and Spotify's terms don't allow apps to record its audio, so it's for my own clips only.
+- Kairos isn't signed by a publisher, so Windows shows a warning the first time it runs.
 
-1. Change `<Version>` in `Kairos.csproj`.
-2. Add an entry at the top of `CHANGELOG.md`; it appears in the app under settings → *What's new*.
-3. Commit, then tag and push: `git tag v1.3.0 && git push origin v1.3.0`.
+## Licence
 
-GitHub Actions builds `Kairos.exe` and creates the release automatically. It checks that the tag matches the version in `Kairos.csproj` first.
+All rights reserved. The code is here to read, but not to copy, use or share without asking. See [LICENSE](LICENSE).
+
+<div align="center">
+<sub><a href="https://nafthan.co.uk">nafthan.co.uk</a></sub>
+</div>

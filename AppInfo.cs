@@ -12,7 +12,7 @@ namespace Kairos
     public static class AppInfo
     {
         /// <summary>Set this to your GitHub repository once it exists, e.g. "https://github.com/yourname/kairos".</summary>
-        public const string RepoUrl = "";
+        public const string RepoUrl = "https://github.com/nafthan/kairos";
 
         public static Version Version { get; } =
             typeof(AppInfo).Assembly.GetName().Version ?? new Version(1, 0, 0);
