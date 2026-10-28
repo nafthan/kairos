@@ -37,20 +37,24 @@ namespace Kairos
         private static string _lastPage = "text";
         private string _page = "text";
 
-        private static readonly (string Key, string Icon, string Title, string Subtitle)[] Pages =
+        // Grouped in the sidebar: how it looks, how it behaves, Spotify and lyrics, and the rest.
+        private static readonly (string Group, string Key, string Icon, string Title, string Subtitle)[] Pages =
         {
-            ("text",      "", "Text",      "Font, size and how the current line stands out"),
-            ("effects",   "\uE734", "Effects",   "Glow, karaoke fill, focus blur and movement"),
-            ("colours",   "", "Colours",   "Themes, text colours and background"),
-            ("background", "\uE91B", "Background", "A colour, a picture or GIF, the album art, or a colour dance"),
-            ("layout",    "\uE8A9", "Layout",    "Drag the lyrics, title, cover and profile picture wherever you like"),
-            ("window",    "", "Window",    "Shape, placement and how the window behaves"),
-            ("behaviour", "", "Behaviour", "Scrolling, seeking and lyrics timing"),
-            ("lyrics",    "\uE8F1", "My lyrics", "Your own lyrics, for songs the online library doesn't have"),
-            ("spotify",   "\uE8D6", "Spotify",   "Connect your account to add songs to playlists and browse them"),
-            ("stats",     "\uE9D9", "Statistics", "What you listen to, when, and how many of your songs have lyrics"),
-            ("shortcuts", "", "Shortcuts", "Keys, mouse actions and where things are saved"),
+            ("Look",      "themes",     "\uE790", "Themes",     "Ready-made looks, and your own saved ones"),
+            ("Look",      "text",       "\uE8D2", "Text",       "Font, size, colours and how the current line stands out"),
+            ("Look",      "effects",    "\uE734", "Effects",    "Glow, karaoke fill, focus blur, movement and the colour dance"),
+            ("Look",      "background", "\uE91B", "Background", "A colour, a picture or GIF, or the album art"),
+            ("Look",      "layout",     "\uE8A9", "Layout",     "Window size and shape, and where the lyrics, title, cover and profile picture go"),
+            ("Behaviour", "window",     "\uE7F4", "Window",     "Staying on top, click-through, mini mode and the tray icon"),
+            ("Behaviour", "behaviour",  "\uE916", "Following",  "Following the song, lyrics timing, and songs without lyrics"),
+            ("Spotify and lyrics", "spotify", "\uE8D6", "Spotify",    "The Spotify app alongside Kairos, and connecting your account"),
+            ("Spotify and lyrics", "lyrics",  "\uE8F1", "My lyrics",  "Your own lyrics, for songs the online library doesn't have"),
+            ("Spotify and lyrics", "stats",   "\uE9D9", "Statistics", "What you listen to, when, and how many of your songs have lyrics"),
+            ("More",      "shortcuts",  "\uE765", "Shortcuts",  "Keys, mouse actions, and where things are saved"),
         };
+
+        /// <summary>Page names from earlier versions (e.g. the right-click menu's "Save or manage themes…").</summary>
+        private static string PageKey(string key) => key switch { "colours" => "themes", _ => key };
 
         public SettingsWindow(Settings settings, Action apply, string? startPage = null, SpotifyClient? spotify = null,
                               MediaWatcher? media = null, Stats? stats = null,
@@ -80,7 +84,7 @@ namespace Kairos
 
             VersionButton.Content = $"Version {AppInfo.VersionText}  ·  What's new";
 
-            if (startPage != null) _lastPage = startPage;
+            if (startPage != null) _lastPage = PageKey(startPage);
             BuildNav();
             ShowPage(_lastPage);
             _preview = new LivePreview(_s, _albumArt, _profilePicture);
@@ -98,8 +102,21 @@ namespace Kairos
         private void BuildNav()
         {
             Nav.Children.Clear();
+            string? group = null;
             foreach (var p in Pages)
             {
+                if (p.Group != group)
+                {
+                    group = p.Group;
+                    Nav.Children.Add(new TextBlock
+                    {
+                        Text = group.ToUpperInvariant(),
+                        FontSize = 10.5,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = (Brush)FindResource("FaintBrush"),
+                        Margin = new Thickness(12, Nav.Children.Count == 0 ? 0 : 12, 0, 4),
+                    });
+                }
                 var content = new StackPanel { Orientation = Orientation.Horizontal };
                 content.Children.Add(new TextBlock
                 {
@@ -128,6 +145,7 @@ namespace Kairos
         public void GoTo(string key)
         {
             if (key == "changelog") { ShowChangelog(); return; }
+            key = PageKey(key);
             foreach (var rb in Nav.Children.OfType<RadioButton>())
                 if ((string)rb.Tag == key) { rb.IsChecked = true; return; }
         }
@@ -136,6 +154,7 @@ namespace Kairos
 
         private void ShowPage(string key)
         {
+            key = PageKey(key);
             var page = Pages.FirstOrDefault(p => p.Key == key);
             if (page.Key == null) page = Pages[0];
             _page = _lastPage = page.Key;
@@ -152,7 +171,7 @@ namespace Kairos
             {
                 case "text": BuildTextPage(); break;
                 case "effects": BuildEffectsPage(); break;
-                case "colours": BuildColoursPage(); break;
+                case "themes": BuildThemesPage(); break;
                 case "window": BuildWindowPage(); break;
                 case "layout": BuildLayoutPage(); break;
                 case "background": BuildBackgroundPage(); break;
@@ -251,6 +270,11 @@ namespace Kairos
             SliderRow(font, "Line spacing", null, 0, 40, 1, _s.LineSpacing, v => _s.LineSpacing = v, v => $"{v:0} px");
             Row(font, "Alignment", null, AlignmentPicker());
 
+            var colours = Card("Colours");
+            ColorRow(colours, "Current line", () => _s.CurrentLineColor, v => _s.CurrentLineColor = v);
+            ColorRow(colours, "Other lines", () => _s.OtherLinesColor, v => _s.OtherLinesColor = v);
+            SliderRow(colours, "Other lines brightness", null, 0.05, 1, 0.05, _s.OtherLinesOpacity, v => _s.OtherLinesOpacity = v, v => $"{v * 100:0}%");
+
             var style = Card("Highlight");
             SwitchRow(style, "Bold current line", null, _s.CurrentLineBold, v => _s.CurrentLineBold = v);
             SwitchRow(style, "Bold other lines", null, _s.OtherLinesBold, v => _s.OtherLinesBold = v);
@@ -260,8 +284,6 @@ namespace Kairos
 
         private void BuildEffectsPage()
         {
-            BuildDanceCard();
-
             var glow = Card("Glow");
             SwitchRow(glow, "Glow on current line", "A soft halo around the line being sung", _s.CurrentLineGlow, v => _s.CurrentLineGlow = v);
             SwitchRow(glow, "Same colour as the line", "Turn off to choose a different glow colour",
@@ -283,42 +305,28 @@ namespace Kairos
             SwitchRow(motion, "Beat pulse", "The current line gently pulses with Spotify's sound", _s.BeatPulse, v => _s.BeatPulse = v);
             SliderRow(motion, "Pulse strength", null, 0.3, 2, 0.1, _s.BeatPulseStrength, v => _s.BeatPulseStrength = v, v => $"{v:0.0}×");
             Hint(motion, "Pop and beat pulse show on the lyrics window itself; the preview above shows glow, fill and blur.");
+
+            BuildDanceCard();
         }
 
-        private void BuildColoursPage()
+        private void BuildThemesPage()
         {
-            var themes = Card("Themes");
+            var themes = Card("Ready-made");
             var wrap = new WrapPanel { Margin = new Thickness(14, 14, 4, 6) };
             foreach (var t in Settings.BuiltInThemes)
                 wrap.Children.Add(ThemeCard(t, deletable: false));
             themes.Children.Add(wrap);
 
             BuildCustomThemes();
-
-            var text = Card("Text");
-            ColorRow(text, "Current line", () => _s.CurrentLineColor, v => _s.CurrentLineColor = v);
-            ColorRow(text, "Other lines", () => _s.OtherLinesColor, v => _s.OtherLinesColor = v);
-            SliderRow(text, "Other lines brightness", null, 0.05, 1, 0.05, _s.OtherLinesOpacity, v => _s.OtherLinesOpacity = v, v => $"{v * 100:0}%");
         }
 
         private void BuildWindowPage()
         {
-            var shape = Card("Shape");
-            SliderRow(shape, "Corner roundness", null, 0, 30, 1, _s.CornerRadius, v => _s.CornerRadius = v, v => $"{v:0} px");
-            SliderRow(shape, "Padding", "Space between the edge and the text", 0, 40, 1, _s.Padding, v => _s.Padding = v, v => $"{v:0} px");
-
             var win = Card("Window");
             SwitchRow(win, "Always on top", "Stays above other windows while you work", _s.AlwaysOnTop, v => _s.AlwaysOnTop = v);
-            SwitchRow(win, "Show song title and artist", null, _s.ShowTrackInfo, v => _s.ShowTrackInfo = v);
-            SwitchRow(win, "Show album art beside the title", null, _s.ShowAlbumArt, v => _s.ShowAlbumArt = v);
             SwitchRow(win, "Lock position", "Stops the window being dragged by accident", _s.LockPosition, v => _s.LockPosition = v);
             SwitchRow(win, "Lock size", "Hides the resize handle so the window can't be resized by accident", _s.LockSize, v => _s.LockSize = v);
-            SwitchRow(win, "Show in taskbar", null, _s.ShowInTaskbar, v => _s.ShowInTaskbar = v);
-            SwitchRow(win, "Start with Windows", "Opens Kairos when you sign in", _s.StartWithWindows, v => _s.StartWithWindows = v);
-            SwitchRow(win, "Icon in the notification area", "By the clock: click it to hide or show Kairos, right-click for play, mini mode and more",
-                _s.ShowTrayIcon, v => _s.ShowTrayIcon = v);
-            SwitchRow(win, "Shortcuts work in any app", "Ctrl+Alt+C centres the window left-to-right, Ctrl+Alt+M switches mini mode, Ctrl+Alt+T switches click-through",
-                _s.GlobalCentreShortcut, v => _s.GlobalCentreShortcut = v);
+            Hint(win, "The window's size and shape, and what goes where in it, are on the Layout page.");
 
             var over = Card("Over other apps");
             SwitchRow(over, "Click-through", "Clicks go to whatever is underneath, so Kairos never gets in the way. Hold Ctrl over it to use it (drag, buttons, right-click). Ctrl+Alt+T switches it from any app.",
@@ -333,7 +341,19 @@ namespace Kairos
             SwitchRow(mini, "Stretch across the screen", "As wide as the screen it's on, like a subtitle bar", _s.MiniFullWidth, v => _s.MiniFullWidth = v);
             SliderRow(mini, "Text size", null, 10, 60, 1, _s.MiniFontSize, v => _s.MiniFontSize = v, v => $"{v:0} pt");
 
-            var pair = Card("Together with Spotify");
+            var system = Card("Windows");
+            SwitchRow(system, "Start with Windows", "Opens Kairos when you sign in", _s.StartWithWindows, v => _s.StartWithWindows = v);
+            SwitchRow(system, "Show in taskbar", null, _s.ShowInTaskbar, v => _s.ShowInTaskbar = v);
+            SwitchRow(system, "Icon in the notification area", "By the clock: click it to hide or show Kairos, right-click for play, mini mode and more",
+                _s.ShowTrayIcon, v => _s.ShowTrayIcon = v);
+            SwitchRow(system, "Shortcuts work in any app", "Ctrl+Alt+C centres the window left-to-right, Ctrl+Alt+M switches mini mode, Ctrl+Alt+T switches click-through",
+                _s.GlobalCentreShortcut, v => _s.GlobalCentreShortcut = v);
+        }
+
+        /// <summary>Opening, hiding and closing the Spotify app alongside Kairos (no account connection needed).</summary>
+        private void BuildSpotifyAppCard()
+        {
+            var pair = Card("The Spotify app");
             SwitchRow(pair, "Open Spotify when Kairos opens", "Only if it isn't open already",
                 _s.OpenSpotifyOnStart, v => { _s.OpenSpotifyOnStart = v; Dispatcher.BeginInvoke(new Action(Refresh)); });
 
@@ -434,16 +454,6 @@ namespace Kairos
             Hint(lists, (_s.NoLyricsPlaylists.Count == 0 ? "None yet. " : "") +
                         "To add one, play it and right-click the lyrics window → This playlist has no lyrics, " +
                         "or use Mark as no lyrics in the playlist browser. Needs your Spotify connection.");
-
-            var data = Card("Saved lyrics");
-            var clear = new Button { Style = (Style)FindResource("GhostButton"), Content = "Clear" };
-            clear.Click += (_, _) =>
-            {
-                LyricsService.ClearCache();
-                clear.Content = "Cleared";
-                clear.IsEnabled = false;
-            };
-            Row(data, "Clear saved lyrics", "Songs are looked up again the next time they play", clear);
         }
 
         private void BuildBackgroundPage()
@@ -454,8 +464,8 @@ namespace Kairos
                 _s.BackgroundMode,
                 v => { _s.BackgroundMode = v; Changed(); Refresh(); }));
 
-            Hint(mode, "Backgrounds are saved with themes: set one up here, then use Save current look on the Colours page " +
-                       "to switch between looks in one click.");
+            Hint(mode, "Backgrounds are saved with themes: set one up here, then use Save current look on the Themes page " +
+                       "to switch between looks in one click. For moving colours from the album art, see Colour dance under Effects.");
 
             switch (_s.BackgroundMode == "Dance" ? "Colour" : _s.BackgroundMode)
             {
@@ -468,9 +478,6 @@ namespace Kairos
                         _s.BackgroundOpacity, v => _s.BackgroundOpacity = v, v => $"{v * 100:0}%");
                     break;
             }
-
-            // The colour dance works with any background, so it's here as well as on the Effects page.
-            BuildDanceCard();
         }
 
         private void BuildImageSection()
@@ -1086,6 +1093,17 @@ namespace Kairos
                 reset.Click += (_, _) => { _s.LyricsFolder = ""; _s.Save(); _lyricsChanged(); ShowPage("lyrics"); };
                 where.Children.Add(reset);
             }
+
+            // Lyrics looked up online are kept, so they're instant next time.
+            var online = Card("Lyrics from the internet");
+            var clear = new Button { Style = (Style)FindResource("GhostButton"), Content = "Clear" };
+            clear.Click += (_, _) =>
+            {
+                LyricsService.ClearCache();
+                clear.Content = "Cleared";
+                clear.IsEnabled = false;
+            };
+            Row(online, "Clear saved lyrics", "Kairos keeps lyrics it has looked up online. Clearing them means songs are looked up again the next time they play. Your own lyrics aren't touched.", clear);
         }
 
         /// <summary>A confirmation banner at the top of the current page.</summary>
@@ -1110,6 +1128,8 @@ namespace Kairos
 
         private void BuildSpotifyPage()
         {
+            BuildSpotifyAppCard();
+
             if (_spotify.IsConnected)
             {
                 var conn = Card("Connected");

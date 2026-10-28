@@ -61,7 +61,10 @@
                         <Button x:Name="VersionButton" DockPanel.Dock="Bottom" Style="{StaticResource TextButton}"
                                 HorizontalAlignment="Left" Margin="12,0,0,14" FontSize="11.5"
                                 ToolTip="See what's changed in each version" Click="VersionButton_Click"/>
-                        <StackPanel x:Name="Nav" Margin="10,0,10,0"/>
+                        <!-- Scrolls if the window is short (the scroll bar stays hidden; the mouse wheel works) -->
+                        <ScrollViewer VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+                            <StackPanel x:Name="Nav" Margin="10,0,10,8"/>
+                        </ScrollViewer>
                     </DockPanel>
                 </Border>
 

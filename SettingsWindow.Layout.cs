@@ -96,6 +96,11 @@ namespace Kairos
             SliderRow(size, "Width", null, 200, 1600, 10, _s.Width, v => ResizeLyricsWindow(v, _s.Height), v => $"{v:0} px");
             SliderRow(size, "Height", null, 110, 1200, 10, _s.Height, v => ResizeLyricsWindow(_s.Width, v), v => $"{v:0} px");
 
+            // ---- The window's own shape ----
+            var shape = Card("Window shape");
+            SliderRow(shape, "Corner roundness", null, 0, 30, 1, _s.CornerRadius, v => _s.CornerRadius = v, v => $"{v:0} px");
+            SliderRow(shape, "Space around the edge", "Between the window's edge and everything in it", 0, 40, 1, _s.Padding, v => _s.Padding = v, v => $"{v:0} px");
+
             // ---- Title, cover ----
             var parts = Card("Song and cover");
             SwitchRow(parts, "Song title and artist", null, _s.ShowTrackInfo, v => { _s.ShowTrackInfo = v; Dispatcher.BeginInvoke(new Action(() => _layoutEditor?.Redraw())); });
@@ -171,7 +176,7 @@ namespace Kairos
                 ColorRow(panel, "Border colour", () => _s.Layout.LyricsBorderColor, v => _s.Layout.LyricsBorderColor = v);
                 SliderRow(panel, "Border opacity", null, 0, 1, 0.05, layout.LyricsBorderOpacity, v => _s.Layout.LyricsBorderOpacity = v, v => $"{v * 100:0}%");
                 SliderRow(panel, "Border width", null, 0, 6, 0.5, layout.LyricsBorderWidth, v => _s.Layout.LyricsBorderWidth = v, v => v < 0.25 ? "None" : $"{v:0.#} px");
-                SliderRow(panel, "Corner roundness", null, 0, 40, 1, layout.LyricsPanelCorner, v => _s.Layout.LyricsPanelCorner = v, v => $"{v:0} px");
+                SliderRow(panel, "Panel corners", null, 0, 40, 1, layout.LyricsPanelCorner, v => _s.Layout.LyricsPanelCorner = v, v => $"{v:0} px");
                 SliderRow(panel, "Space inside", null, 0, 40, 1, layout.LyricsPanelPadding, v => _s.Layout.LyricsPanelPadding = v, v => $"{v:0} px");
             }
         }

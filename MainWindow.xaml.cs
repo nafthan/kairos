@@ -939,7 +939,7 @@ namespace Kairos
                 }
             }
             theme.Items.Add(new Separator());
-            theme.Items.Add(Item("Save or manage themes…", () => OpenSettings("colours")));
+            theme.Items.Add(Item("Save or manage themes…", () => OpenSettings("themes")));
             m.Items.Add(theme);
 
             var background = new MenuItem { Header = "Background" };
