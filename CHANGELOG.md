@@ -25,7 +25,7 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 ### Changed
 - Long GIFs are made frame by frame, so they no longer use a lot of memory.
 
-## [1.14.0] - 2026-10-26
+## [1.14.0] - 2026-10-24
 
 ### Added
 - Layout editor (settings → Layout): a big live preview where you drag the lyrics, the song title and artist, the album cover and your profile picture anywhere in the window, and drag their edges and corners to resize them. Edges and centres snap to the window and to each other with guide lines (hold Alt to place freely); arrow keys nudge, Ctrl + arrows resize. Layouts stay in proportion when the window is resized.
@@ -36,7 +36,7 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 - Profile picture: your Spotify account's picture or one of your own, shown as a circle. In the standard layout it sits on the right of the title row (the cover is on the left); in a custom layout, anywhere you like.
 - Saved themes now include the layout.
 
-## [1.13.0] - 2026-10-26
+## [1.13.0] - 2026-10-218
 
 ### Added
 - Click-through: the lyrics window (and mini strip) lets clicks go to whatever is underneath, so it never gets in the way. Hold Ctrl over it to drag it, use its buttons or right-click. Switch it in settings → Window, the right-click menu, the tray icon, or Ctrl+Alt+T from any app.
@@ -44,7 +44,7 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 - Tray icon by the clock: click it to hide or show Kairos; right-click for play/pause, next, previous, mini mode, click-through, Spotify's window, lyric card, settings and exit. Hover over it to see the song.
 - Lyric cards (right-click → Lyric card…): pick one to four lines, a shape (square, tall or wide) and a background (yours, the album art or a colour), with the song and the Kairos logo underneath. Copy it as a picture, save it as a PNG, or save or copy it as an animated GIF with the karaoke fill, glow, colour dance, album art drift and your GIF background moving on a loop.
 
-## [1.12.1] - 2026-10-26
+## [1.12.1] - 2026-10-18
 
 ### Changed
 - New logo: the right moment rising over a lyric line.
@@ -52,7 +52,7 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 ### Fixed
 - The logo in settings was blurry; it's now drawn sharply at any size and display scaling.
 
-## [1.12.0] - 2026-10-26
+## [1.12.0] - 2026-10-12
 
 ### Added
 - Spotify's window can be hidden (settings → Window → Together with Spotify → Spotify's window: Hidden). Spotify plays in the background with no window or taskbar button, so only Kairos is in the taskbar; Kairos opens Spotify when it starts and closes it when it closes. Right-click → Show Spotify's window when you need it; minimising it hides it again.
@@ -62,7 +62,7 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 - The colour dance is now its own layer that works with any background (colour, picture/GIF or album art), instead of replacing the background. Its settings are on the Effects and Background pages. Settings and themes from 1.10–1.11 carry over.
 - "Keep Spotify minimised" is now the Spotify window choice: Normal, Minimised or Hidden.
 
-## [1.11.0] - 2026-10-26
+## [1.11.0] - 2026-10-07
 
 ### Added
 - Statistics (settings → Statistics, or right-click → Statistics): listening time today, this week and all time, songs played, your day streak, when in the day you listen, your top songs and artists, and how many of your songs have synced lyrics, with a shortcut to add lyrics for your most-played songs that are missing them. Kept only on your PC; can be switched off or reset.
@@ -71,13 +71,13 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 ### Fixed
 - The colour dance could stay hidden after the window reloaded, and its colours could stop short of the album's real colours.
 
-## [1.10.0] - 2026-10-26
+## [1.10.0] - 2026-09-29
 
 ### Added
 - Mini mode: a slim strip, like subtitles, showing just the line being sung and (optionally) the next one, with your fonts, colours, glow and karaoke fill. Switch with the new mini button, Ctrl+Alt+M (works in any app) or the right-click menu; double-click the strip to go back. It can stretch across the screen, and remembers where you put it.
 - Colour dance background: glowing colours taken from the album art drift around behind the lyrics, swelling and speeding up with the beat, and blend into the next song's colours. Adjust speed, how much it moves with the music, size and darkening. Works in themes and the live preview.
 
-## [1.9.0] - 2026-10-26
+## [1.9.0] - 2026-09-23
 
 ### Added
 - Live preview in settings: a miniature of your lyrics window at its real shape, playing a sample song with your fonts, colours, background, title row and album art. Karaoke fill, glow, blur, pop and beat pulse all animate. Click it to pause.
@@ -89,7 +89,7 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 - New logo.
 - Your own lyrics now live inside Kairos's folder (%APPDATA%\Kairos\Lyrics). Lyrics in the old Documents\Kairos Lyrics folder are moved across automatically.
 
-## [1.8.0] - 2026-10-25
+## [1.8.0] - 2026-09-21
 
 ### Added
 - Playlists without lyrics: mark a playlist (for example an instrumental one) and its songs skip the lyrics search and show your no-lyrics visual. Mark it from the right-click menu while it plays, or with "Mark as no lyrics" in the playlist browser; manage them in settings under Behaviour. Needs the Spotify connection.
@@ -108,7 +108,7 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 - The volume control could miss Spotify: it now looks on every output device and recognises Spotify more reliably, including the Microsoft Store version.
 - Long right-click menus now scroll instead of running off the screen.
 
-## [1.7.0] - 2026-10-25
+## [1.7.0] - 2026-09-18
 
 ### Added
 - Together with Spotify (settings → Window): open Spotify when Kairos opens (kept minimised), pause or close Spotify when you close Kairos, and hide or close Kairos when Spotify closes. With "Hide Kairos", Kairos waits in the background and appears whenever Spotify opens.
@@ -120,7 +120,7 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 - The volume control now adjusts Spotify only, with mute and a live level meter.
 - The right-click menu, its submenus and tooltips now match the dark settings look, with a green tick for options that are on.
 
-## [1.6.0] - 2026-10-25
+## [1.6.0] - 2026-09-15
 
 ### Added
 - "This song has no lyrics" button next to "Add lyrics". Kairos remembers it and stops searching; right-click to undo.
@@ -131,7 +131,7 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 ### Fixed
 - Playlists shared with you through Spotify's invite feature now show up and can be added to.
 
-## [1.5.0] - 2026-10-25
+## [1.5.0] - 2026-09-12
 
 ### Added
 - Sync timings: turn plain lyrics into synced ones by tapping Space as each line starts while the song plays. Undo a tap with Backspace, click any line to re-time from there, shift everything earlier or later, and adjust for reaction time. Already-synced lyrics can be fine-tuned the same way.
@@ -139,7 +139,7 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 - "Sync timings for this song" in the right-click menu, which saves straight to your lyrics folder.
 - If Windows' media controls can't jump to a point in the song, Kairos uses your Spotify connection instead (when connected).
 
-## [1.4.0] - 2026-10-25
+## [1.4.0] - 2026-09-06
 
 ### Added
 - Liked Songs: save the playing song to Liked Songs from the + button, and browse and play them in the playlist browser. If you connected Spotify with an earlier version, reconnect once to allow it.
@@ -149,7 +149,7 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 ### Fixed
 - The + picker showed every letter as a box.
 
-## [1.3.0] - 2026-10-25
+## [1.3.0] - 2026-09-01
 
 ### Added
 - Spotify connection (optional): add the song that's playing to a playlist straight from the lyrics window, and browse and play your playlists. Needs Spotify Premium and a one-time developer app setup, guided step by step in settings.
@@ -163,7 +163,7 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 ### Fixed
 - The song title now lines up with the centred lyrics when album art is shown beside it.
 
-## [1.2.0] - 2026-10-25
+## [1.2.0] - 2026-08-27
 
 ### Added
 - Your own lyrics: a folder with one subfolder per artist and one file per song, checked before the online library.
@@ -175,7 +175,7 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 - Version history in settings (click the version number in the sidebar).
 - Automatic Windows builds on GitHub, with Kairos.exe attached to each release.
 
-## [1.1.0] - 2026-10-25
+## [1.1.0] - 2026-08-26
 
 ### Added
 - Glow on current line option.
@@ -190,7 +190,7 @@ All notable changes to Kairos are listed here. Versions follow [Semantic Version
 - Lines not highlighting or following the song in some cases, thanks to more reliable playback tracking.
 - Unsynced lyrics sometimes chosen when time-synced lyrics were available.
 
-## [1.0.0] - 2026-10-25
+## [1.0.0] - 2026-08-25
 
 ### Added
 - First release: a small, always-on-top window showing time-synced Spotify lyrics, with the current line centred.
